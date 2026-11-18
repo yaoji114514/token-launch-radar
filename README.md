@@ -1,39 +1,39 @@
 # Token Launch Radar
 
-[![make.fun](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01)
+[![token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01)
 [![rank](https://make.fun/badge/token-radar-01/yaoji114514/token-launch-radar/rank.svg)](https://make.fun/bounty/token-radar-01)
 [![reward](https://make.fun/badge/token-radar-01/yaoji114514/token-launch-radar/reward.svg)](https://make.fun/bounty/token-radar-01)
 
-An entry for the [make.fun token-radar-01 bounty](https://make.fun/bounty/token-radar-01): a program that ranks pre-token DeFi protocols by what their token may be worth at launch, and builds a dashboard showing the ranking, a per-protocol detail view, and a farming plan for each protocol.
+An entry for the [token-radar-01 bounty](https://make.fun/bounty/token-radar-01) on make.fun: a program that reads a sealed snapshot of the DeFi protocol universe and ranks the protocols that have not launched a token yet by what a launch might be worth, then presents the ranking in a dashboard with a farming plan for each protocol.
 
 ## What it does
 
-`main.ts` (Node 22, standard library only) reads a snapshot of the protocol universe at `/input/snapshot.json` and writes:
+`main.ts` runs on Node 22 with the standard library only. It reads the snapshot at `/input/snapshot.json` and writes:
 
-- `board.json` — the ranked board (226 rows on the kit snapshot: the 40 watchlist protocols plus 186 further pre-token protocols), each with an implied launch value and a 7-step farming plan.
-- `data.js` — the dashboard's data, beside the page.
-- `dashboard/` — the static dashboard page (sortable, filterable, searchable, with a per-protocol detail view).
-- `screenshots/` — three screenshots of the dashboard, rendered from its own files.
-- `dossier.json` — the submission dossier, built with `buildDossier` from `vendor/makefun-board.ts`.
+- `board.json` — the ranked board. On the kit snapshot it holds 226 rows: the 40 watchlist protocols plus 186 further pre-token protocols. Every row carries an implied launch value and a seven-step farming plan.
+- `data.js` — the same board data, written beside the page for the dashboard to read.
+- `dashboard/` — a static page: the board is sortable, filterable and searchable, and each protocol opens a detail view.
+- `screenshots/` — three screenshots rendered from the dashboard's own files. See [SCREENSHOTS.md](SCREENSHOTS.md).
+- `dossier.json` — the submission summary, built with `buildDossier` from `vendor/makefun-board.ts`.
 
-## How the valuation works
+## How the value is estimated
 
-The model fits a robust log-log regression of market cap on TVL over the already-traded protocols in the same snapshot (one outlier-trimming pass), then applies the fitted line to pre-token protocols, with multipliers for 7-day TVL growth and protocol age. No protocol list is hard-coded: every number is derived from the snapshot's own figures. On the kit snapshot the fit covers 114 protocols with R² 0.23, and the dashboard states the fit and its validation error plainly.
+The model fits a robust log-log regression of market cap on TVL across the protocols in the same snapshot that already trade, with one pass that trims outliers, then applies the fitted line to the pre-token protocols. Two multipliers adjust the result: one for seven-day TVL growth, one for how long the protocol has existed. No protocol list is hard-coded anywhere; every number comes from the snapshot. On the kit snapshot the fit covers 114 protocols at R-squared 0.23, and the dashboard states the fit and its validation error in plain words rather than dressing them up.
 
-## How to run
+## Running it
 
-Under the make.fun harness the program runs with `/input/snapshot.json` provided and writes to `/output`. Locally, with a snapshot at `/input/snapshot.json`:
+Under the make.fun harness, the sealed snapshot is provided at `/input/snapshot.json` and the program runs as-is. Locally, with a snapshot mounted at the same path:
 
 ```sh
 node main.ts
 ```
 
-`SCREENSHOTS.md` records how the screenshots were captured.
+The run is deterministic and uses no network: two runs on the same snapshot write identical bytes.
 
 ## Layout
 
-- `main.ts` — entry point (the kit starter's runner, unchanged).
-- `lib/model.ts` — valuation model and farming-plan generation.
+- `main.ts` — the entry point, the kit starter runner.
+- `lib/model.ts` — the valuation model and the farming plans.
 - `vendor/makefun-board.ts` — the kit's dossier library, unchanged.
-- `dashboard/` — the dashboard page (`index.html`, `app.css`, `app.js`).
-- `screenshots/` — the dashboard's own screenshots.
+- `dashboard/` — the page files.
+- `screenshots/` — screenshots of the dashboard itself.

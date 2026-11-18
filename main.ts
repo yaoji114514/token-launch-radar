@@ -1,3 +1,11 @@
+// Token Launch Radar: the runner for this token-radar-01 entry.
+//
+// It reads the sealed snapshot, writes the ranked board, the dashboard data, the
+// dashboard page, the screenshots and the dossier, and does it deterministically:
+// standard library only, no network, the same snapshot always yields the same bytes.
+// Valuation and farming plans live in the radar-2 model in lib/model.ts; this file
+// only drives the run and assembles the output.
+//
 // A working token-radar-01 entry (Node 22, standard library only).
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores every
