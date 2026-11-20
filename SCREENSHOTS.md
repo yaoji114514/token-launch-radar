@@ -1,4 +1,4 @@
-# Screenshots: regenerated from the built dashboard (2026-11-20, radar-4 build)
+# Screenshots: regenerated from the built dashboard (2026-11-20, radar-5 build)
 
 The three JPEGs in `screenshots/` are real captures of this entry's dashboard,
 taken with the headless-shell Chromium via `../shots/capture.mjs`:

@@ -18,7 +18,10 @@
 //   category   = the protocol's category's median market-cap-to-TVL ratio against the kept set's
 //             global median, in log10 and shrunk by n/(n+5), for categories with at least 3 traded
 //             comps; other categories get no adjustment (multiplier 1). Radar-3, earned on the
-//             holdout: split-half median error x2.69 against the plain line's x2.77.
+//             holdout: split-half median error x2.69 against the plain line's x2.77. Re-tested in
+//             radar-5 (stronger shrinkage, higher minN, winsorised, damped, pooled, residual-shift,
+//             multi-feature and ridge variants): none wins both the split-half and the leave-one-out
+//             median checks, so the rule is kept and the dashboard still shows the LOO miss.
 //   odds    = P(the protocol has launched), a logistic fit on the snapshot's own protocols
 //             (CEX and versioned pools excluded): log10(tvl), log1p(age), clamped 7d growth and
 //             one-hot categories with at least 15 protocols, L2 lambda 10, IRLS. Radar-4, earned
@@ -43,6 +46,9 @@
 // stated on the board and changeable there — net of the plan's gas, per hour of hands-on time.
 // FARM when the net is positive and at least $5 an hour, MARGINAL when positive but slower, SKIP
 // when the gas alone eats the expectation. The dashboard shows the arithmetic; no verdict is a slogan.
+// The farm plans carry snapshot-derived specifics (radar-5): the main action names the protocol's
+// TVL and 7d change, and the hold step is dated with the listing date and the day the hold ends
+// (listing date + age + hold, which is the snapshot date + hold).
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -95,7 +101,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-4';
+export const MODEL_VERSION = 'radar-5';
 
 /** The odds model's constants: the fitted launch propensity. */
 export const ODDS = {
@@ -1093,9 +1099,25 @@ function secondActionFor(p: SnapshotProtocol): string {
   return `Use a second feature of the app once, such as a swap, a borrow or a vote.`;
 }
 
+/** The date `days` after a listing date (YYYY-MM-DD), or null when the date is absent or bad. */
+function dateAfter(listedAt: string | null, days: number): string | null {
+  if (listedAt === null) return null;
+  const t = Date.parse(`${listedAt}T00:00:00Z`);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** A TVL as a short figure: $2.75B above a billion, $254M below it. */
+function tvlText(tvlUsd: number): string {
+  return tvlUsd >= 1_000_000_000 ? `$${(tvlUsd / 1_000_000_000).toFixed(2)}B` : `$${Math.round(tvlUsd / 1_000_000)}M`;
+}
+
 /**
  * A protocol's farm plan: seven steps, each an action with a cost and a time. The plan is derived from
- * the protocol's own record (category, chains, TVL, age), never from a hand-written list of names.
+ * the protocol's own record (category, chains, TVL, age, 7d change, listing date), never from a
+ * hand-written list of names. The main action names the protocol's TVL and 7d change, and the hold
+ * step is dated: the listing date and the day the hold ends (listing + age + hold, which is the
+ * snapshot date + hold). Protocols with no listing date get no date in the hold step.
  */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
@@ -1104,6 +1126,9 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const gas = gasFor(capital);
   const hold = holdDaysFor(age);
   const action = actionFor(p, capital, chain);
+  const changeText = p.change_7d === null ? 'n/a' : `${p.change_7d >= 0 ? '+' : ''}${p.change_7d.toFixed(2)}%`;
+  const mainAction = `${action.replace(/\.$/, '')} (TVL ${tvlText(p.tvl_usd)}, 7d ${changeText}).`;
+  const endDate = age === null ? null : dateAfter(p.listed_at, age + hold);
   const secondStep: FarmStep =
     second !== null
       ? {
@@ -1123,7 +1148,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       time: '5 minutes',
     },
     {
-      text: action,
+      text: mainAction,
       cost: `$${capital} of capital and about $${gas} of gas`,
       time: '15 minutes to set up',
     },
@@ -1134,7 +1159,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       time: '10 minutes a week',
     },
     {
-      text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
+      text: `Hold the position for at least ${hold} days${endDate === null ? '' : `, until ${endDate}`}${age === null ? '' : ` (listed ${p.listed_at})`} so the activity is counted in more than one snapshot.`,
       cost: `the $${capital} stays in the position`,
       time: `${hold} days`,
     },

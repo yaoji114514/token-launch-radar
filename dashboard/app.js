@@ -70,9 +70,7 @@
   }
 
   // ==FARM-BEGIN==
-  // The farm-plan templates: the same derivation main.ts writes to board.json. Category, chains, TVL
-  // and age decide the action, the capital, the hold and every cost and time. No name is special-cased.
-  // lib/model.ts carries the same block between the same markers; a parity check compares both.
+  // Farm-plan templates, same derivation as lib/model.ts (same markers, parity-checked).
   function chainOf(p) { return p.chains && p.chains.length > 0 ? p.chains[0] : 'its main chain'; }
   function secondChainOf(p) { return p.chains && p.chains.length > 1 ? p.chains[1] : null; }
   function capitalFor(p) {
@@ -135,30 +133,35 @@
     if (s.length < 20) s = s + " Hold the position and check the protocol's own page.";
     return s;
   }
+  function dateAfter(d, n) { if (!d) return null; var t = Date.parse(d + 'T00:00:00Z'); return isFinite(t) ? new Date(t + n * 864e5).toISOString().slice(0, 10) : null; }
   function farmSteps(p) {
     var chain = chainOf(p);
     var second = secondChainOf(p);
     var capital = capitalFor(p);
     var gas = gasFor(capital);
     var hold = holdDaysFor(p.age_days);
+    var action = actionFor(p, capital, chain);
+    var tvl = p.tvl_usd >= 1e9 ? '$' + (p.tvl_usd / 1e9).toFixed(2) + 'B' : '$' + Math.round(p.tvl_usd / 1e6) + 'M';
+    var chg = p.change_7d == null ? 'n/a' : (p.change_7d >= 0 ? '+' : '') + p.change_7d.toFixed(2) + '%';
+    var mainAction = action.replace(/\.$/, '') + ' (TVL ' + tvl + ', 7d ' + chg + ').';
+    var end = p.age_days == null ? null : dateAfter(p.listed_at, p.age_days + hold);
     var secondCapital = Math.max(25, Math.round(capital / 2));
     var secondStep = second !== null
       ? { text: 'Repeat the position on ' + second + ' with a second, smaller amount of $' + secondCapital + ' so the wallet is active on two chains.', cost: '$' + secondCapital + ' of capital and about $3 of gas', time: '10 minutes' }
       : { text: secondActionFor(p), cost: 'about $2 of gas', time: '10 minutes' };
     return [
       { text: 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
-      { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and about $' + gas + ' of gas', time: '15 minutes to set up' },
+      { text: mainAction, cost: '$' + capital + ' of capital and about $' + gas + ' of gas', time: '15 minutes to set up' },
       secondStep,
       { text: 'Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.', cost: 'about $2 of gas a week', time: '10 minutes a week' },
-      { text: 'Hold the position for at least ' + hold + ' days so the activity is counted in more than one snapshot.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
+      { text: 'Hold the position for at least ' + hold + ' days' + (end ? ', until ' + end : '') + (p.age_days == null ? '' : ' (listed ' + p.listed_at + ')') + ' so the activity is counted in more than one snapshot.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
       { text: "Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
       { text: 'Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.', cost: 'nothing but the log', time: '5 minutes' }
     ].map(stepText);
   }
   // ==FARM-END==
 
-  // The plan's costed economics, from the same helpers as the steps: capital, gas, time, and the
-  // allocation that would pay for the gas alone. Estimates from the plan's own steps, nothing else.
+  // The plan's costed economics, from the same helpers as the steps: capital, gas, time, break-even.
   function farmEconomics(p) {
     var capital = capitalFor(p);
     var second = secondChainOf(p);
@@ -176,10 +179,7 @@
     return rest === 0 ? h + 'h' : h + 'h ' + rest + 'm';
   }
 
-  // The verdict, from the plan's own arithmetic and the scenario the board is showing: expected
-  // allocation is the expected value times the drop share, net of the plan's gas, per hour of
-  // hands-on time. Default share 0.001% is a 5% community allocation split across ~5,000 wallets.
-  // Mirrors lib/model.ts verdictFor/farmEconomicsTs; board.json carries the default scenario.
+  // The verdict, from the plan's own arithmetic: expected value x drop share, net of gas, per hour. Mirrors lib/model.ts.
   function scenarioEcon(p, horizonDays) {
     var capital = capitalFor(p);
     var second = secondChainOf(p);
@@ -203,8 +203,7 @@
     };
   }
 
-  // The comps chart: traded protocols as dots on log-log axes, the fitted line through them, and the
-  // watchlist's implied values as diamonds. Pure SVG, built from DATA, no network.
+  // The comps chart: traded protocols as dots on log-log axes, the fitted line, watchlist diamonds. Pure SVG, no network.
   function chartSvg() {
     var W = 660, H = 320, L = 56, R = 16, T = 14, B = 38;
     var pts = DATA.fit_points || [];
@@ -330,9 +329,8 @@
     );
   }
 
-  // The evidence board: everything the ranking rests on, on the first screen. KPI strip, the
-  // 758-protocol ledger, the validation table with its one failing check named, and the integrity
-  // strip. Divs, not a table: the smoke test counts the board's rows by <tr>.
+  // The evidence board: KPI strip, 758-protocol ledger, validation table with its failing check
+  // named, integrity strip. Divs, not a table: the smoke test counts the board's rows by <tr>.
   function evidence() {
     var v = DATA.validation || {};
     var o = DATA.odds || {};
@@ -343,7 +341,7 @@
       kpi('Holdout error', v.split_half_factor ? 'x' + v.split_half_factor.toFixed(2) : 'n/a', 'plain line x' + (v.split_half_plain_factor ? v.split_half_plain_factor.toFixed(2) : 'n/a')),
       kpi('Coverage (80%)', v.coverage_80 !== null && v.coverage_80 !== undefined ? (v.coverage_80 * 100).toFixed(1) + '%' : 'n/a', 'n=' + (v.coverage_n || 0) + ' held out'),
       kpi('Odds Brier', o.brier !== undefined ? o.brier.toFixed(3) : 'n/a', 'base rate ' + (o.base_brier !== undefined ? o.base_brier.toFixed(3) : 'n/a')),
-      kpi('Checks', (v.checks_passed || 0) + '/' + (v.checks_total || 0) + ' pass', 'miss named below'),
+      kpi('Checks', (v.checks_passed || 0) + '/' + (v.checks_total || 0) + ' pass', (v.checks_total || 0) > 0 && (v.checks_passed || 0) === (v.checks_total || 0) ? 'all pass' : 'miss named below'),
       kpi('FARM rows', String(DATA.farmable_rows), 'default scenario'),
       kpi('Best net/h', DATA.best_net_per_hour_usd !== undefined ? '$' + DATA.best_net_per_hour_usd.toFixed(0) : 'n/a', 'net of gas')
     );
@@ -366,7 +364,7 @@
     var validation = el('div', { class: 'valid' },
       el('h2', { text: 'Validation, out of sample' }),
       vrow('Split-half, adjusted', v.split_half_factor ? 'x' + v.split_half_factor.toFixed(2) : 'n/a', 'PASS', 'plain x' + (v.split_half_plain_factor ? v.split_half_plain_factor.toFixed(2) : 'n/a') + ', same held-out half'),
-      vrow('Leave-one-out', v.loo_median_factor ? 'x' + v.loo_median_factor.toFixed(2) : 'n/a', 'FAIL', 'plain x' + (v.loo_plain_factor ? v.loo_plain_factor.toFixed(2) : 'n/a') + ': the adjustment fails leave-one-out'),
+      vrow('Leave-one-out', v.loo_median_factor ? 'x' + v.loo_median_factor.toFixed(2) : 'n/a', v.loo_median_factor && v.loo_plain_factor && v.loo_median_factor < v.loo_plain_factor ? 'PASS' : 'FAIL', 'plain x' + (v.loo_plain_factor ? v.loo_plain_factor.toFixed(2) : 'n/a') + (v.loo_median_factor && v.loo_plain_factor && v.loo_median_factor < v.loo_plain_factor ? ': earns its keep leave-one-out' : ': fails leave-one-out')),
       vrow('80% interval coverage', v.coverage_80 !== null && v.coverage_80 !== undefined ? (v.coverage_80 * 100).toFixed(1) + '%' : 'n/a', 'PASS', 'inside the 65–95% band'),
       vrow('Odds Brier, even fits odd', o.brier_fwd !== undefined ? o.brier_fwd.toFixed(3) : 'n/a', 'PASS', 'base rate ' + (o.base_brier_fwd !== undefined ? o.base_brier_fwd.toFixed(3) : 'n/a')),
       vrow('Odds Brier, odd fits even', o.brier_rev !== undefined ? o.brier_rev.toFixed(3) : 'n/a', 'PASS', 'base rate ' + (o.base_brier_rev !== undefined ? o.base_brier_rev.toFixed(3) : 'n/a')),
@@ -527,8 +525,7 @@
     );
   }
 
-  // The launch odds in one sentence: what the fitted model is, how well it scores, and which
-  // categories launch most often. The numbers come from the snapshot's traded protocols only.
+  // The launch odds in one sentence: what the fitted model is, how well it scores, which categories launch most often.
   function oddsNote() {
     var o = DATA.odds;
     if (!o) return 'No launch-odds model on this snapshot.';
