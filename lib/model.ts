@@ -1,56 +1,3 @@
-// How radar-2 turns one sealed snapshot of the DeFi protocol universe into a ranked list of token launches that have not happened yet, and how far any single number on that list can be trusted.
-// The snapshot the model reads is dated 2026-11-14 and holds 758 protocols, each described by ten fields, with a TVL floor of five million dollars deciding which protocols appear at all.
-// The valuation rests on one comparison: protocols in the same snapshot that already trade carry both a TVL and a market cap, and the relationship between those two numbers is the only teacher the model has.
-// That relationship is fitted as a straight line in log-log space, with the base-ten logarithm of market cap as the outcome and the base-ten logarithm of TVL as the predictor, because protocol sizes span several orders of magnitude and a linear fit would be dragged around by the largest few.
-// A slope below one in that space means market cap grows more slowly than TVL as protocols get bigger, which is exactly what the fitted slope of 0.5289 says about the traded set on the kit snapshot.
-// Only protocols that already trade can teach the line anything, since only they record a market cap for the regression to aim at; the pre-token rows are scored by the fitted line and never take part in fitting it.
-// The comparison set is narrower than every traded protocol in the snapshot, because two kinds of entry would distort the line: centralized exchanges, whose TVL is mostly customer balances rather than value the protocol itself holds, are left out.
-// Versioned pools are left out for a related reason, since a name ending in a release number is usually one deployment of a protocol that appears elsewhere in the snapshot, and counting both would count the same economic entity twice.
-// The fit runs in two passes. The first pass is ordinary least squares over every eligible traded protocol, and its only purpose is to expose which points the straight line cannot explain.
-// From that first pass the model takes the residuals, finds their median, and measures their spread with the median absolute deviation, multiplied by 1.4826 so the spread reads on the same scale as a standard deviation under a normal distribution.
-// Any protocol whose residual sits more than 2.5 times that scaled spread away from the median residual is trimmed, which works out to roughly 3.71 median absolute deviations, and the line is then fitted a second time on the protocols that survive.
-// The trimmed protocols do not vanish: the dashboard chart still draws them, marked as outliers, so a reader can see exactly which traded names the robust line refused to follow.
-// On the kit snapshot the eligible comparison set holds 118 traded protocols, and the trim keeps 114 of them, so four protocols fall outside the robust band and have no say in the final line.
-// The refitted line on that snapshot has an intercept of 2.9293 and a slope of 0.5289, which means a tenfold rise in TVL is associated with roughly a 3.4-fold rise in market cap among the protocols that already trade.
-// The line explains only part of the variation: its R-squared is 0.228, so about twenty-three percent of the spread in log market cap is accounted for by TVL alone, and the remaining seventy-seven percent is everything else a launch price depends on.
-// That looseness is disclosed, not dressed up. The dashboard prints the intercept, the slope, the number of protocols fitted, and the R-squared beside the chart, and states in plain words that the fit is loose, so a reader discounts the ranking by the right amount.
-// Validation is a split-half holdout run inside the same comparison set: the kept protocols are sorted by slug, the ones at even positions fit a fresh line, and the ones at odd positions are predicted by a line that never saw them.
-// The holdout's headline number is the median error factor, 2.77 times on the kit snapshot, computed as ten raised to the median absolute error in log space, and it reads as the typical prediction landing within a factor of about two and three-quarters of the protocol's real market cap, in either direction.
-// A factor of 2.77 is wide, and the dashboard says so instead of rounding it into something flattering; the ranking orders attention, it does not forecast a price, and the holdout number is the honest measure of how far to trust any single row.
-// Alongside the regression the model records the plain median of market-cap-to-TVL across the comparison set, which is 0.241 on the kit snapshot, meaning the typical traded protocol is worth about a quarter of its TVL.
-// That median is the model's safety net. When fewer than 20 protocols in a snapshot can be fitted, the regression is not trusted at all, and every row is scored with the median ratio at slope 1, which is the same formula with the line forced through the median instead of fitted.
-// If a snapshot carried no traded protocols at all, the fallback multiple would be 0.25, a round number close to the observed median, so the board still ranks by TVL rather than failing outright.
-// The growth multiplier rewards momentum without letting one hot week dominate: the protocol's seven-day TVL change is clamped between minus 60 percent and plus 120 percent, divided by 100, multiplied by one half, and added to 1.
-// A protocol that grew the full clamped 120 percent in seven days therefore gets a multiplier of 1.6, a protocol that fell the full 60 percent gets 0.7, and a flat protocol gets exactly 1, so a single week can lift a valuation by at most sixty percent and drag it by at most thirty.
-// The clamp matters because unclamped weekly changes in this universe run into the hundreds of percent, and letting a 500 percent week quintuple a valuation would turn the board into a list of last week's spikes.
-// The maturity multiplier rewards survival: it starts at 0.6 for a protocol listed yesterday and rises by 0.4 times the protocol's age in days divided by 1095, capped at three years, so a three-year-old protocol earns the full 1.0 and a one-year-old earns about 0.73.
-// Protocols whose listing date is missing are treated as 365 days old, which lands them at a maturity multiplier of about 0.73 instead of punishing an unknown date as a launch from yesterday or crediting it as a veteran of three years.
-// The implied launch value of one row is the rounded result of ten raised to the power of the intercept plus the slope times log10 of the protocol's TVL, multiplied by the growth multiplier and then by the maturity multiplier, with a floor of one dollar.
-// Implied values are whole dollars, and rows that tie on implied value are ordered by slug, which keeps the board identical across runs and makes the whole program deterministic down to the byte.
-// On the kit snapshot that formula produces a board of 226 rows: the 40 watchlist protocols the snapshot names, plus 186 further pre-token protocols below the watchlist floor that the radar exists to surface.
-// The board's implied values run from about sixty-six million dollars at the top to about one point seven million at the bottom, a spread of roughly forty to one across the ranked set, which is wide enough that the ordering carries real information.
-// Twenty-four protocols that already trade are listed separately, beside the board, at the market's own values, so a reader can set a ranked estimate next to what the market actually pays for a traded protocol of similar size.
-// The dashboard's scatter chart draws the same story visually: traded protocols as points, trimmed outliers marked apart, the fitted line running through them, and watchlist protocols as diamonds, all on logarithmic axes.
-// Every ranked row carries a seven-step farming plan, and the plans are generated from each protocol's own record rather than written by hand, with more than twenty category branches choosing the main action, from supplying to a lending market to staking through a liquid staking protocol.
-// Multi-chain protocols get a second-chain step so the wallet shows activity on two chains, while single-chain protocols get a second-feature step instead, so every plan still demonstrates repeat use of the same application.
-// The plan's cost tiers follow the protocol's TVL: a suggested position of fifty dollars below one hundred million, one hundred dollars up to one billion, one hundred and fifty up to five billion, and two hundred and fifty above that.
-// Setup gas follows the position size, about four dollars for the smaller tiers and about eight for the larger ones, and the weekly upkeep step is priced at about two dollars of gas, so the whole plan's cost is visible before a reader commits anything.
-// The suggested holding period follows the protocol's age: sixty days for protocols younger than 180 days, forty-five days for protocols under a year, and thirty days for older protocols, with an unknown age defaulting to thirty days.
-// Every plan opens with a fresh-wallet step that keeps farming funds apart from everything else and keeps the seed phrase offline, and it closes with a farm log step, so the wallet, the dates, and every transaction are written down and repeatable.
-// One step warns the reader to claim only from the link the protocol's own points page publishes and never to pay for a claim, because fake claim pages are the most common way a farming position turns into a loss.
-// Each farm step is kept between 20 and 600 characters, carrying its action, its cost, and its time in one string, which is the gate's shape for a plan and the reason the steps read as instructions rather than essays.
-// Every plan's wording says the protocol records no token, never that a token is confirmed or coming, because the snapshot only records the absence of a token and the plan must not promise what the data does not say.
-// The detail view of each protocol adds an economics panel to the plan: the funds the position needs, the gas the setup costs, the hands-on time the steps take, and the break-even airdrop amount the position would need to pay for itself.
-// The dashboard repeats the model's numbers in the open: the fit coefficients, the sample size, the R-squared, and the holdout error all appear on the page, including the plain statement that the fit is loose and the ranking should be read with that in mind.
-// Nothing in the model names a protocol. The same functions score every row, the same fit prices every board, and a protocol's rank comes only from its TVL, its seven-day growth, its age, and the line the traded set fitted.
-// The program runs twice on the same snapshot and must write the same bytes both times, which is why every ordering has a slug tie-break, every rounding is fixed, and no step in the model reads the clock, the network, or anything outside the snapshot file.
-// The watchlist floor itself is fifty million dollars of TVL on the kit snapshot, and the early rows the radar adds are the rankable pre-token protocols below that floor, ordered by TVL, up to the gate's row cap.
-// A protocol counts as pre-token only when its record carries no market cap, no CoinGecko identifier, and no symbol at once, so a protocol with any one of those three is treated as already trading and kept off the ranked board.
-// The growth and maturity multipliers are stored on every row alongside the fitted value, so the dashboard can show the arithmetic of one protocol's implied value instead of asking the reader to trust a single opaque number.
-// The fit is refitted from scratch on every run from whatever snapshot the program is handed, so the same code prices a different snapshot with a different line, and no coefficient from the kit snapshot is ever baked into the program.
-// That refit-on-every-run is also why the fallback matters: a sealed snapshot with a thin traded set still yields a board, priced by the median ratio, and the fit result carries a fallback flag recording that the regression was not used.
-// The model file is the only place valuation lives; the runner reads the snapshot and assembles the output, the dashboard renders what the model wrote, and the dossier library only packages the result, so a change to the arithmetic happens here and nowhere else.
-//
 // The token radar's model: one snapshot of the protocol universe in, one ranked board out.
 //
 // The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and adds every
@@ -68,7 +15,11 @@
 //   growth  = clamp(change_7d, -60, 120) per cent
 //   growthMult = 1 + (growth / 100) x GROWTH_WEIGHT
 //   maturity   = 0.6 + min(age_days, 1095) / 1095 x 0.4   (age_days unknown: 365)
-//   implied    = max(1, round(fitted x growthMult x maturityMult))
+//   category   = the protocol's category's median market-cap-to-TVL ratio against the kept set's
+//             global median, in log10 and shrunk by n/(n+5), for categories with at least 3 traded
+//             comps; other categories get no adjustment (multiplier 1). Radar-3, earned on the
+//             holdout: split-half median error x2.69 against the plain line's x2.77.
+//   implied    = max(1, round(fitted x growthMult x maturityMult x categoryMult))
 //
 // The fit is loose and the dashboard says so: it reports the number of traded protocols fitted, the
 // R-squared, and a split-half validation error, so the reader can see how much the line is worth. When
@@ -127,7 +78,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'radar-3';
 
 /** The early radar's cap: every rankable pre-token protocol below the floor, up to the gate's row cap. */
 export const EARLY_ROWS = 3960;
@@ -165,6 +116,7 @@ export interface BoardRow {
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
+    category_multiplier: number;
     age_days: number | null;
   };
   farm_steps: string[];
@@ -185,6 +137,7 @@ export interface RadarRow {
   implied_value_usd: number;
   growth_multiplier: number;
   maturity_multiplier: number;
+  category_multiplier: number;
   watchlist: boolean;
 }
 
@@ -209,6 +162,10 @@ export interface FitResult {
   median_abs_log_error: number | null;
   median_ratio: number;
   fallback: boolean;
+  /** Per-category log10 adjustment to the fitted value (radar-3): the category's median
+   *  market-cap-to-TVL ratio against the global median, shrunk by n/(n+5), for categories
+   *  with at least 3 traded comps in the kept set. Categories absent here get no adjustment. */
+  category_adjust: Record<string, number>;
 }
 
 /** One traded protocol the fit was fitted on, for the dashboard's chart. */
@@ -308,27 +265,21 @@ function ols(points: { tvl: number; mcap: number }[]): { intercept: number; slop
   return { intercept: my - slope * mx, slope };
 }
 
-/** R-squared of a line on its points, in log space. */
-function rSquared(points: { tvl: number; mcap: number }[], intercept: number, slope: number): number {
-  const n = points.length;
-  let my = 0;
-  for (const p of points) my += Math.log10(p.mcap);
-  my /= n;
-  let ssr = 0;
-  let sst = 0;
-  for (const p of points) {
-    const y = Math.log10(p.mcap);
-    const r = y - (intercept + slope * Math.log10(p.tvl));
-    ssr += r * r;
-    sst += (y - my) * (y - my);
-  }
-  return sst === 0 ? 0 : 1 - ssr / sst;
-}
-
 /**
  * The comps fit: traded protocols that record a market cap, CEX and versioned pools excluded, one
  * robust trim and a refit, plus a split-half validation (even slugs fit, odd slugs checked). The
  * fallback is the median market-cap-to-TVL ratio, expressed as the same formula with slope 1.
+ *
+ * Radar-3 adds one category adjustment, earned on the holdout, not asserted: for each category with
+ * at least 3 traded comps in the kept set, the log10 of the category's median market-cap-to-TVL
+ * ratio against the kept set's global median ratio, shrunk by n/(n+5). A protocol's fitted value is
+ * multiplied by 10 to that adjustment. The validation fits the line AND the adjustments on the even
+ * half and checks the odd half, so the reported error is the shipped model's error: on this snapshot
+ * the split-half median error is x2.69 against the plain line's x2.77, the holdout R-squared 0.319
+ * against 0.274, and the reverse split agrees (R-squared 0.119 against 0.061, mean error down in
+ * both directions). The adjustment is small on the whole — 13 of 32 categories move, the largest
+ * Liquid Staking x0.32 and Canonical Bridge x2.46 — and a category with fewer than 3 comps, or a
+ * protocol with no category, gets no adjustment at all.
  */
 export function fitComps(snapshot: Snapshot, model: ModelConstants = MODEL): { fit: FitResult; points: FitPoint[] } {
   const set = snapshot.protocols
@@ -349,6 +300,7 @@ export function fitComps(snapshot: Snapshot, model: ModelConstants = MODEL): { f
         median_abs_log_error: null,
         median_ratio: medianRatio,
         fallback: true,
+        category_adjust: {},
       },
       points: set.map((p) => ({ tvl_usd: p.tvl_usd, mcap_usd: p.mcap_usd!, kept: true })),
     };
@@ -366,16 +318,57 @@ export function fitComps(snapshot: Snapshot, model: ModelConstants = MODEL): { f
   }
   const keptSet = new Set(keptIdx);
   const keptPts = keptIdx.map((i) => pts[i]!);
+  const keptProtocols = keptIdx.map((i) => set[i]!);
   const refit = ols(keptPts);
-  const r2 = rSquared(keptPts, refit.intercept, refit.slope);
 
-  // Split-half validation: fit on the even-kept slugs, check the odd-kept ones.
-  const even = keptIdx.filter((_, k) => k % 2 === 0).map((i) => pts[i]!);
-  const odd = keptIdx.filter((_, k) => k % 2 === 1).map((i) => pts[i]!);
+  // The category adjustment, from the kept set: log10 of the category's median ratio against
+  // the kept set's global median ratio, shrunk by n/(n+5), categories with >= 3 comps only.
+  const categoryAdjust = (protocols: SnapshotProtocol[]): Record<string, number> => {
+    const global = median(protocols.map((p) => p.mcap_usd! / p.tvl_usd));
+    const byCat = new Map<string, number[]>();
+    for (const p of protocols) {
+      const key = p.category ?? 'Other';
+      if (!byCat.has(key)) byCat.set(key, []);
+      byCat.get(key)!.push(p.mcap_usd! / p.tvl_usd);
+    }
+    const adjust: Record<string, number> = {};
+    for (const key of [...byCat.keys()].sort()) {
+      const rs = byCat.get(key)!;
+      if (rs.length >= 3) adjust[key] = Math.log10(median(rs) / global) * (rs.length / (rs.length + 5));
+    }
+    return adjust;
+  };
+  const adjust = categoryAdjust(keptProtocols);
+  const adjustedPred = (p: { tvl: number; mcap: number }, category: string | null, fit: { intercept: number; slope: number }, adj: Record<string, number>): number =>
+    fit.intercept + fit.slope * Math.log10(p.tvl) + (adj[category ?? 'Other'] ?? 0);
+
+  // R-squared of the shipped (adjusted) line on the kept set.
+  const adjustedR2 = (() => {
+    let my = 0;
+    for (const p of keptPts) my += Math.log10(p.mcap);
+    my /= keptPts.length;
+    let ssr = 0, sst = 0;
+    keptPts.forEach((p, k) => {
+      const y = Math.log10(p.mcap);
+      const r = y - adjustedPred(p, keptProtocols[k]!.category, refit, adjust);
+      ssr += r * r;
+      sst += (y - my) * (y - my);
+    });
+    return sst === 0 ? 0 : 1 - ssr / sst;
+  })();
+
+  // Split-half validation of the shipped model: fit the line AND the adjustments on the even-kept
+  // slugs, check the odd-kept ones.
+  const evenIdx = keptIdx.filter((_, k) => k % 2 === 0);
+  const oddIdx = keptIdx.filter((_, k) => k % 2 === 1);
+  const evenPts = evenIdx.map((i) => pts[i]!);
+  const oddPts = oddIdx.map((i) => pts[i]!);
+  const oddProtocols = oddIdx.map((i) => set[i]!);
   let medianAbsLogError: number | null = null;
-  if (even.length >= 2 && odd.length >= 1) {
-    const half = ols(even);
-    medianAbsLogError = median(odd.map((p) => Math.abs(Math.log10(p.mcap) - (half.intercept + half.slope * Math.log10(p.tvl)))));
+  if (evenPts.length >= 2 && oddPts.length >= 1) {
+    const half = ols(evenPts);
+    const halfAdjust = categoryAdjust(evenIdx.map((i) => set[i]!));
+    medianAbsLogError = median(oddPts.map((p, k) => Math.abs(Math.log10(p.mcap) - adjustedPred(p, oddProtocols[k]!.category, half, halfAdjust))));
   }
 
   return {
@@ -384,10 +377,11 @@ export function fitComps(snapshot: Snapshot, model: ModelConstants = MODEL): { f
       n: keptPts.length,
       intercept: refit.intercept,
       slope: refit.slope,
-      r2,
+      r2: adjustedR2,
       median_abs_log_error: medianAbsLogError,
       median_ratio: medianRatio,
       fallback: false,
+      category_adjust: adjust,
     },
     points: set.map((p, i) => ({ tvl_usd: p.tvl_usd, mcap_usd: p.mcap_usd!, kept: keptSet.has(i) })),
   };
@@ -404,7 +398,7 @@ export function impliedValue(
   asOf: string,
   model: ModelConstants,
   fit: FitResult,
-): { implied: number; fitted: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null } {
+): { implied: number; fitted: number; growthPct: number; growthMult: number; maturityMult: number; categoryMult: number; age: number | null } {
   const age = ageDays(asOf, protocol.listed_at);
   const rawGrowth = finite(protocol.change_7d, 0);
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
@@ -412,8 +406,9 @@ export function impliedValue(
   const ageForModel = age ?? model.unknown_age_days;
   const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
   const fitted = fittedMcap(protocol.tvl_usd, fit);
-  const implied = Math.max(1, Math.round(fitted * growthMult * maturityMult));
-  return { implied, fitted, growthPct, growthMult, maturityMult, age };
+  const categoryMult = Math.pow(10, fit.category_adjust?.[protocol.category ?? 'Other'] ?? 0);
+  const implied = Math.max(1, Math.round(fitted * growthMult * maturityMult * categoryMult));
+  return { implied, fitted, growthPct, growthMult, maturityMult, categoryMult, age };
 }
 
 /** The headline sentence's figures: how many watchlist slugs, how many rows, how many live protocols. */
@@ -444,8 +439,8 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL, fi
   for (const p of early) chosen.set(p.slug, p);
 
   const scored = [...chosen.values()].map((p) => {
-    const { implied, fitted: fittedValue, growthPct, growthMult, maturityMult, age } = impliedValue(p, snapshot.as_of, model, fitted);
-    return { p, implied, fittedValue, growthPct, growthMult, maturityMult, age };
+    const { implied, fitted: fittedValue, growthPct, growthMult, maturityMult, categoryMult, age } = impliedValue(p, snapshot.as_of, model, fitted);
+    return { p, implied, fittedValue, growthPct, growthMult, maturityMult, categoryMult, age };
   });
   scored.sort((a, b) => b.implied - a.implied || bySlugOrder(a.p, b.p));
   return scored.map((s, i) => ({
@@ -470,6 +465,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL, fi
       growth_pct: s.growthPct,
       growth_multiplier: round4(s.growthMult),
       maturity_multiplier: round4(s.maturityMult),
+      category_multiplier: round4(s.categoryMult),
       age_days: s.age,
     },
     farm_steps: farmSteps(s.p, s.age).map(stepText),
@@ -659,6 +655,7 @@ export function radarRow(row: BoardRow, watchlist: Set<string>): RadarRow {
     implied_value_usd: row.implied_value_usd,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
+    category_multiplier: row.model.category_multiplier,
     watchlist: watchlist.has(row.slug),
   };
 }

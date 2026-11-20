@@ -49,14 +49,19 @@ a { color: var(--accent); }
 
 .shell { max-width: 1320px; margin: 0 auto; padding: var(--step-5) var(--step-6) var(--step-7); }
 .top {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--step-5);
-  padding-bottom: var(--step-4); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--step-5);
+  padding: var(--step-4) var(--step-5); border-radius: var(--radius-panel);
+  background: var(--ink); color: #eef3ef;
 }
 .brand { display: flex; align-items: center; gap: var(--step-3); }
-.mark { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); flex: none; }
-.brand-name { font-family: var(--font-num); font-size: 13px; letter-spacing: 0.02em; color: var(--muted); }
-.top-meta { display: flex; flex-wrap: wrap; gap: var(--step-3); justify-content: flex-end; color: var(--muted); font-size: 13px; }
+.mark { width: 12px; height: 12px; border-radius: 50%; background: #34c08a; flex: none; }
+.brand-name { font-family: var(--font-num); font-size: 13px; letter-spacing: 0.02em; color: #a9bcb1; }
+.top-meta { display: flex; flex-wrap: wrap; gap: var(--step-3); justify-content: flex-end; color: #a9bcb1; font-size: 13px; }
 .top-meta span { white-space: nowrap; }
+.eyebrow {
+  font-family: var(--font-num); font-size: 12px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: var(--step-2);
+}
 .lede { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr); gap: var(--step-6); padding: var(--step-6) 0 var(--step-5); }
 .lede p { color: var(--muted); max-width: 62ch; margin-top: var(--step-2); }
 .facts { display: grid; gap: var(--step-2); align-content: start; border-left: 1px solid var(--border); padding-left: var(--step-5); }
@@ -90,7 +95,7 @@ a { color: var(--accent); }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { padding: var(--step-3) var(--step-3); border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
-th { color: var(--muted); font-size: 12px; font-weight: 500; white-space: nowrap; }
+th { color: var(--muted); font-size: 12px; font-weight: 500; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.04em; }
 th button { display: inline-flex; align-items: center; gap: var(--step-1); border: 0; background: none; padding: 0; color: inherit; font: inherit; }
 th button:hover { color: var(--ink); }
 tbody tr { cursor: pointer; }
@@ -102,7 +107,12 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .sub { color: var(--muted); font-size: 12px; }
 .pos { color: var(--accent); }
 .neg { color: var(--negative); }
-.bar { width: 120px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--border) 60%, var(--surface)); overflow: hidden; }
+.bar { width: 140px; height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--border) 60%, var(--surface)); overflow: hidden; }
+.rank-top {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px;
+  padding: 0 6px; border-radius: 8px; font-weight: 600;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
 .bar i { display: block; height: 100%; background: var(--accent); }
 .implied { display: flex; align-items: center; gap: var(--step-2); }
 .status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
@@ -116,7 +126,7 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .chart .tick { fill: var(--muted); font: 11px var(--font-num); text-anchor: middle; }
 .chart .tick.end { text-anchor: end; }
 .chart .axis { fill: var(--muted); font: 12px var(--font-body); text-anchor: middle; }
-.chart .fitline { stroke: var(--ink); stroke-width: 1.5; }
+.chart .fitline { stroke: var(--ink); stroke-width: 2; }
 .chart .dot { fill: var(--accent); opacity: 0.75; }
 .chart .dot.out { fill: var(--surface); stroke: var(--muted); stroke-width: 1; opacity: 0.9; }
 .chart .diamond { fill: var(--amber); opacity: 0.9; }
@@ -145,13 +155,15 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .detail-head { display: flex; align-items: start; justify-content: space-between; gap: var(--step-4); }
 .detail-head > div { min-width: 0; }
 .detail-head .sub { overflow-wrap: anywhere; }
-.close { flex: none; min-width: 32px; min-height: 32px; padding: 0 var(--step-2); white-space: nowrap; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
+.close { flex: none; min-width: 32px; min-height: 32px; padding: 0 var(--step-3); white-space: nowrap; border: 1px solid var(--accent); border-radius: var(--radius-control); background: var(--accent); color: var(--surface); font-weight: 500; }
 .detail h2 { margin-top: var(--step-1); }
 .detail .sub { margin-top: var(--step-1); }
 .detail-section { margin-top: var(--step-5); padding-top: var(--step-4); border-top: 1px solid var(--border); }
 .detail-section h3 { margin-bottom: var(--step-2); }
 .equation { display: grid; gap: var(--step-2); font-family: var(--font-num); font-size: 13px; }
 .equation div { display: flex; justify-content: space-between; gap: var(--step-3); }
+.equation div.hl { background: var(--tint); border-radius: var(--radius-control); padding: var(--step-2) var(--step-3); margin: 0 calc(-1 * var(--step-3)); }
+.equation div.hl b { color: var(--accent); }
 .equation span { color: var(--muted); }
 .steps { margin: 0; padding-left: var(--step-5); display: grid; gap: var(--step-3); }
 .steps li { padding-left: var(--step-1); }

@@ -28,15 +28,18 @@
     if (days >= 365) return (days / 365).toFixed(1) + 'y';
     return Math.max(0, Math.round(days)) + 'd';
   }
-  // The model in one function: the fitted comps line, then the growth and maturity adjustments. The
-  // page recomputes a row from the snapshot figures and checks the number board.json carries.
+  // The model in one function: the fitted comps line, then the growth, maturity and category
+  // adjustments. The page recomputes a row from the snapshot figures and checks the number
+  // board.json carries.
   function impliedOf(row, model, fit) {
     var fitted = Math.pow(10, fit.intercept + fit.slope * Math.log10(Math.max(1, row.tvl_usd)));
     var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
     var growthMult = 1 + (growth / 100) * model.growth_weight;
     var age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
     var maturity = model.maturity_floor + (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-    return Math.max(1, Math.round(fitted * growthMult * maturity));
+    var adj = fit.category_adjust ? fit.category_adjust[row.category || 'Other'] : undefined;
+    var catMult = Math.pow(10, adj === undefined || adj === null ? 0 : adj);
+    return Math.max(1, Math.round(fitted * growthMult * maturity * catMult));
   }
   function fittedOf(row, fit) {
     return Math.pow(10, fit.intercept + fit.slope * Math.log10(Math.max(1, row.tvl_usd)));
@@ -204,8 +207,8 @@
     pts.forEach(function (p) {
       var cx = X(Math.log10(Math.max(1, p.tvl_usd))).toFixed(1), cy = Y(Math.log10(Math.max(1, p.mcap_usd))).toFixed(1);
       s += p.kept
-        ? '<circle cx="' + cx + '" cy="' + cy + '" r="3.2" class="dot" />'
-        : '<circle cx="' + cx + '" cy="' + cy + '" r="3.2" class="dot out" />';
+        ? '<circle cx="' + cx + '" cy="' + cy + '" r="3.8" class="dot" />'
+        : '<circle cx="' + cx + '" cy="' + cy + '" r="3.8" class="dot out" />';
     });
     watch.forEach(function (r) {
       var cx = X(Math.log10(Math.max(1, r.tvl_usd))), cy = Y(Math.log10(Math.max(1, r.implied_value_usd)));
@@ -273,6 +276,7 @@
   function lede() {
     return el('section', { class: 'lede' },
       el('div', null,
+        el('p', { class: 'eyebrow', text: 'Pre-token protocols · Ranked by implied value' }),
         el('h1', { text: DATA.watchlist_size + ' watchlist protocols, ranked by implied value' }),
         el('p', { text: 'The watchlist is the floor: every protocol with at least $' + Math.round(DATA.floor_usd / 1e6) + 'M of TVL that records no token. The early radar adds ' + DATA.early_size + ' pre-token protocols below that floor. Implied value is fitted from the traded protocols in this same snapshot, then adjusted for seven-day growth and age with no token. It is a model, not a promise.' })
       ),
@@ -336,7 +340,7 @@
         onclick: function () { openDetail(r.slug); },
         onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.slug); } }
       },
-        el('td', { class: 'num', text: String(r.rank) }),
+        el('td', { class: 'num' }, r.rank <= 3 ? el('span', { class: 'rank-top', text: String(r.rank) }) : String(r.rank)),
         el('td', null, el('div', { class: 'name' },
           el('b', { text: r.name }),
           el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') })
@@ -402,13 +406,22 @@
       : 'split-half median error x' + Math.pow(10, f.median_abs_log_error).toFixed(2) + ': half the held-out traded protocols sit within that factor of the line';
     var fitNote = f.fallback
       ? 'Too few traded protocols record a market cap in this snapshot, so the line falls back to the median market-cap-to-TVL ratio (' + f.median_ratio.toFixed(3) + '), the same formula with slope 1.'
-      : 'Fitted on ' + f.n + ' of ' + f.n_total + ' traded protocols that record a market cap (' + (f.n_total - f.n) + ' trimmed as outliers, beyond ' + m.trim_k + ' x 1.4826 x MAD from the median residual). R-squared ' + f.r2.toFixed(3) + ' in log space: the fit is loose, and ' + valid + '.';
+      : 'Fitted on ' + f.n + ' of ' + f.n_total + ' traded protocols that record a market cap (' + (f.n_total - f.n) + ' trimmed as outliers, beyond ' + m.trim_k + ' x 1.4826 x MAD from the median residual). R-squared ' + f.r2.toFixed(3) + ' in log space for the category-adjusted line: the fit is loose, and ' + valid + '.';
+    var adjEntries = f.category_adjust ? Object.keys(f.category_adjust).map(function (c) {
+      return { c: c, mult: Math.pow(10, f.category_adjust[c]) };
+    }) : [];
+    adjEntries.sort(function (a, b) { return Math.abs(Math.log10(b.mult)) - Math.abs(Math.log10(a.mult)); });
+    var adjNote = adjEntries.length === 0
+      ? 'No category adjusts the fitted value on this snapshot: every category has too few traded protocols to earn one.'
+      : 'Category multiplier: ' + adjEntries.length + ' categories adjust the fitted value, each from its own traded protocols (median market-cap-to-TVL against the whole set, shrunk by n/(n+5); fewer than 3 traded protocols earns none). Largest: ' +
+        adjEntries.slice(0, 3).map(function (e) { return e.c + ' x' + e.mult.toFixed(2); }).join(', ') + '.';
     return el('section', { class: 'panel model' },
       el('h2', { text: 'How implied value is computed' }),
       el('p', { class: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
       el('div', { class: 'formula' },
-        'implied = round( 10 ^ (' + f.intercept.toFixed(4) + ' + ' + f.slope.toFixed(4) + ' x log10(tvl_usd)) x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') )'
+        'implied = round( 10 ^ (' + f.intercept.toFixed(4) + ' + ' + f.slope.toFixed(4) + ' x log10(tvl_usd)) x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') x category_multiplier )'
       ),
+      el('p', { class: 'sub', text: adjNote }),
       el('div', { class: 'fit-grid' },
         el('div', { class: 'chart', html: chartSvg() }),
         el('div', { class: 'fit-stats' },
@@ -458,6 +471,7 @@
         el('div', null, el('span', { text: 'Age with no token' }), el('b', { class: 'num', text: fmtAge(row.age_days) })),
         el('div', null, el('span', { text: 'Growth multiplier' }), el('b', { class: 'num', text: String(row.growth_multiplier) })),
         el('div', null, el('span', { text: 'Maturity multiplier' }), el('b', { class: 'num', text: String(row.maturity_multiplier) })),
+        el('div', null, el('span', { text: 'Category multiplier' }), el('b', { class: 'num', text: 'x' + Number(row.category_multiplier).toFixed(2) })),
         el('div', null, el('span', { text: 'Implied value' }), el('b', { class: 'num', text: fmtUsd(row.implied_value_usd) }))
       ),
       el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(recomputed) + (recomputed === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
@@ -468,7 +482,7 @@
         el('div', null, el('span', { text: 'Capital in positions' }), el('b', { class: 'num', text: '$' + econ.capital })),
         el('div', null, el('span', { text: 'Gas over the whole plan' }), el('b', { class: 'num', text: 'about $' + econ.gas })),
         el('div', null, el('span', { text: 'Hands-on time' }), el('b', { class: 'num', text: fmtMinutes(econ.minutes) + ' over ' + econ.hold + ' days' })),
-        el('div', null, el('span', { text: 'Break-even allocation (gas only)' }), el('b', { class: 'num', text: '$' + econ.gas }))
+        el('div', { class: 'hl' }, el('span', { text: 'Break-even allocation (gas only)' }), el('b', { class: 'num', text: '$' + econ.gas }))
       ),
       el('p', { class: 'sub', text: 'The plan pays for its gas if any eventual allocation exceeds $' + econ.gas + '. The capital stays in the positions until the hold ends, so it is at risk for the full ' + econ.hold + ' days. Estimates from the steps below; gas varies by chain and congestion.' })
     ));

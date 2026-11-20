@@ -6,6 +6,6 @@ The three images in `screenshots/` are 1440x900 JPEGs rendered from the dashboar
 - `2-detail.jpg` — the Steakhouse Financial detail popup, showing the valuation breakdown, the farm economics and the plan steps.
 - `3-filtered.jpg` — the Risk Curators category filter, showing 33 rows.
 
-The files are about 117 KB, 141 KB and 118 KB, regenerated on the evening of 2026-11-18.
+The files are about 118 KB, 142 KB and 120 KB, regenerated on 2026-11-20 from the radar-3 build (category-adjusted model, polished dashboard).
 
 Two things worth knowing about how they were made: the headless-shell browser zip was fetched with a curl resume download, because Playwright's own downloader kept dropping the connection near 90%; and the capture script opens a fresh page for each view, because hash-only navigation does not re-run the page's init. The gate verifies the screenshots against the dashboard.

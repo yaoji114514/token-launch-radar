@@ -18,20 +18,21 @@ An entry for the [token-radar-01 bounty](https://make.fun/bounty/token-radar-01)
 
 ## How the value is estimated
 
-The model fits a robust log-log regression of market cap on TVL across the protocols in the same snapshot that already trade, with one pass that trims outliers, then applies the fitted line to the pre-token protocols. Two multipliers adjust the result: one for seven-day TVL growth, one for how long the protocol has existed. No protocol list is hard-coded anywhere; every number comes from the snapshot. On the kit snapshot the fit covers 114 protocols at R-squared 0.23, and the dashboard states the fit and its validation error in plain words rather than dressing them up.
+The model fits a robust log-log regression of market cap on TVL across the protocols in the same snapshot that already trade, with one pass that trims outliers, then applies the fitted line to the pre-token protocols. Three multipliers adjust the result: one for seven-day TVL growth, one for how long the protocol has existed, and one for its category — the category's median market-cap-to-TVL ratio against the whole traded set, shrunk by n/(n+5), for categories with at least three traded protocols. No protocol list is hard-coded anywhere; every number comes from the snapshot. On the kit snapshot the fit covers 114 protocols at R-squared 0.32, and the dashboard states the fit and its validation error in plain words rather than dressing them up.
 
 ## Validation
 
 The fit is checked by a split-half holdout that runs inside the traded comparison set, so the check never borrows information from the protocols being ranked.
-The kept protocols are sorted by slug, the ones at even positions fit a fresh regression line, and the ones at odd positions are predicted by that line without ever taking part in fitting it.
-The headline number from that holdout is the median error factor, which is 2.77 on the kit snapshot: the typical prediction lands within a factor of about two and three-quarters of the protocol's actual market cap, high or low.
+The kept protocols are sorted by slug, the ones at even positions fit a fresh regression line and a fresh set of category adjustments, and the ones at odd positions are predicted by that line and those adjustments without ever taking part in fitting them.
+The headline number from that holdout is the median error factor, which is 2.69 on the kit snapshot: the typical prediction lands within a factor of about two and two-thirds of the protocol's actual market cap, high or low.
 That number is ten raised to the median absolute error in log space, so it reads directly as a multiplicative miss rather than an abstract score, and a reader can apply it to any row's implied value in their head.
-A factor of 2.77 is wide, and it is reported as wide: the dashboard shows the holdout error next to the fit coefficients and says plainly that the fit is loose, rather than rounding the validation into a reassuring headline.
+A factor of 2.69 is wide, and it is reported as wide: the dashboard shows the holdout error next to the fit coefficients and says plainly that the fit is loose, rather than rounding the validation into a reassuring headline.
 The reason for disclosing the looseness is that the board's job is to order attention, not to price a launch, and a reader who knows the typical miss can discount the ranking by the right amount instead of treating it as a forecast.
 The holdout also guards against the most flattering mistake a fitted line can make, which is grading itself on the same protocols it was fitted on and reporting an error far smaller than a fresh protocol would see.
 Because the split is by slug order rather than by size or category, the checked half spans the same range of TVL and the same mix of categories as the fitted half, so the holdout is a fair test of the line rather than a test of one corner of the universe.
-The R-squared of 0.228 tells the same story from the other side: TVL alone accounts for about twenty-three percent of the variation in log market cap, and the rest is everything a launch price depends on that TVL cannot see.
+The R-squared of 0.318 tells the same story from the other side: TVL and category together account for about thirty-two percent of the variation in log market cap, and the rest is everything a launch price depends on that TVL cannot see.
 Both numbers travel with the entry: the fit result carries the sample size, the coefficients, the R-squared, and the holdout error, and the dashboard prints all of them on the page beside the chart.
+The category adjustment earned its place on the holdout rather than being asserted: per-category regression lines and per-category intercept shifts were tried under the same split-half protocol and did not beat the plain line, while the shrunk ratio multiplier did — median error 2.69 against 2.77, holdout R-squared 0.319 against 0.274 — and the reverse split agrees, so it ships and the others do not.
 When a snapshot is too thin to fit, the holdout is skipped and the fallback flag is set, so the dashboard never shows a validation number for a line that was never fitted.
 Re-running the holdout on a different snapshot gives a different error factor, because the line, the trim, and the split are all refitted from whatever snapshot the program is handed.
 
