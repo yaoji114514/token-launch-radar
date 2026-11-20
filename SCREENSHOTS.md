@@ -1,11 +1,27 @@
-# Screenshots
+# Screenshots: regenerated from the built dashboard (2026-11-20, radar-4 build)
 
-The three images in `screenshots/` are 1440x900 JPEGs rendered from the dashboard's own files — the `dashboard/` page plus the generated `data.js` — with Playwright 1.65.1 driving headless-shell Chromium.
+The three JPEGs in `screenshots/` are real captures of this entry's dashboard,
+taken with the headless-shell Chromium via `../shots/capture.mjs`:
 
-- `1-board.jpg` — the ranked board view.
-- `2-detail.jpg` — the Steakhouse Financial detail popup, showing the valuation breakdown, the farm economics and the plan steps.
-- `3-filtered.jpg` — the Risk Curators category filter, showing 33 rows.
+- `1-board.jpg` — the evidence board (KPI strip, 758-protocol ledger, validation table, ranked board)
+- `2-detail.jpg` — the detail dossier for the rank-1 protocol (veda)
+- `3-farm.jpg` — the FARM view: the board sorted by net dollars per hands-on hour
 
-The files are about 118 KB, 142 KB and 120 KB, regenerated on 2026-11-20 from the radar-3 build (category-adjusted model, polished dashboard).
+All are 1440x900 JPEG, each under the 512 KiB cap. The capture script picks the
+detail slug (rank 1) from `board.json`, so it stays correct if the sealed
+snapshot differs from the kit snapshot. It uses a fresh page per view: a
+hash-only navigation is a same-document navigation and would not re-run the
+dashboard's init.
 
-Two things worth knowing about how they were made: the headless-shell browser zip was fetched with a curl resume download, because Playwright's own downloader kept dropping the connection near 90%; and the capture script opens a fresh page for each view, because hash-only navigation does not re-run the page's init. The gate verifies the screenshots against the dashboard.
+How the browser was obtained: `npx playwright install` failed repeatedly (the
+CDN connection dropped near 90% of the 199 MiB download), so the headless-shell
+zip was fetched with `curl -C - --retry` (resume across dropped connections)
+from the URL in the install log, verified with `unzip -t`, and placed at
+`~/.cache/ms-playwright/chromium_headless_shell-1255/chrome-headless-shell-linux64/`
+(the directory name Playwright 1.65 expects). The VM's `/opt/meta-chromium/chrome`
+cannot be launched by Playwright (exits with code 13); do not rely on it.
+
+To regenerate: `cd ../shots && node capture.mjs ../out ../entry/screenshots`,
+then re-run `main.ts` into a CLEAN output directory (main.ts copies files in
+but never deletes stale ones — re-running into a dirty `out/` leaves old
+screenshots behind and fails the gate) and re-run `../verify/gate.mjs`.

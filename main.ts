@@ -3,7 +3,7 @@
 // It reads the sealed snapshot, writes the ranked board, the dashboard data, the
 // dashboard page, the screenshots and the dossier, and does it deterministically:
 // standard library only, no network, the same snapshot always yields the same bytes.
-// Valuation and farming plans live in the radar-3 model in lib/model.ts; this file
+// Valuation and farming plans live in the radar-4 model in lib/model.ts; this file
 // only drives the run and assembles the output.
 //
 // A working token-radar-01 entry (Node 22, standard library only).
@@ -22,6 +22,7 @@
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
@@ -59,7 +60,10 @@ if (issue !== null) {
 }
 
 mkdirSync(out, { recursive: true });
-writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
+const boardBytes = Buffer.from(`${JSON.stringify({ rows: board })}\n`, 'utf8');
+writeFileSync(join(out, 'board.json'), boardBytes);
+// The integrity strip shows this hash: the board the page renders is the board on disk.
+radar.board_sha256 = createHash('sha256').update(boardBytes).digest('hex');
 writeFileSync(join(out, 'data.js'), dataScript(radar));
 
 /** Copy one directory's regular files into `to`, skipping names that start with a dot. */
@@ -80,7 +84,7 @@ function copyFiles(from: string, to: string): string[] {
 copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
 const shots = copyFiles(join(here, 'screenshots'), join(out, 'screenshots'));
 if (shots.length < 3) {
-  process.stderr.write(`token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 3, the board, a detail view and a filtered view\n`);
+  process.stderr.write(`token radar: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in 3, the board, a detail view and a farm view\n`);
   process.exit(1);
 }
 for (const name of shots) {
@@ -95,5 +99,6 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEX
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
+    `token radar: radar-4 expected value: top ${board[0]!.slug} $${board[0]!.implied_value_usd} (if launched $${board[0]!.implied_if_launched_usd}, odds ${board[0]!.launch_odds}); odds Brier ${radar.odds.brier.toFixed(4)} vs base ${radar.odds.base_brier.toFixed(4)} (split-half ${radar.odds.brier_fwd.toFixed(4)}/${radar.odds.brier_rev.toFixed(4)}); ${radar.farmable_rows} FARM rows at the default scenario\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

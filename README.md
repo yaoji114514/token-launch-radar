@@ -4,21 +4,25 @@
 [![rank](https://make.fun/badge/token-radar-01/yaoji114514/token-launch-radar/rank.svg)](https://make.fun/bounty/token-radar-01)
 [![reward](https://make.fun/badge/token-radar-01/yaoji114514/token-launch-radar/reward.svg)](https://make.fun/bounty/token-radar-01)
 
-An entry for the [token-radar-01 bounty](https://make.fun/bounty/token-radar-01) on make.fun: a program that reads a sealed snapshot of the DeFi protocol universe and ranks the protocols that have not launched a token yet by what a launch might be worth, then presents the ranking in a dashboard with a farming plan for each protocol.
+An entry for the [token-radar-01 bounty](https://make.fun/bounty/token-radar-01) on make.fun: a program that reads a sealed snapshot of the DeFi protocol universe and ranks the protocols that have not launched a token yet by expected value — what a launch might be worth, weighted by the fitted chance the protocol launches at all — then presents the ranking in a dashboard with a farming plan for each protocol.
 
 ## What it does
 
 `main.ts` runs on Node 22 with the standard library only. It reads the snapshot at `/input/snapshot.json` and writes:
 
-- `board.json` — the ranked board. On the kit snapshot it holds 226 rows: the 40 watchlist protocols plus 186 further pre-token protocols. Every row carries an implied launch value and a seven-step farming plan.
+- `board.json` — the ranked board. On the kit snapshot it holds 226 rows: the 40 watchlist protocols plus 186 further pre-token protocols. Every row carries an if-launched value, fitted launch odds, expected value, a bootstrap P10–P90 range and rank range, a FARM / MARGINAL / SKIP verdict with net dollars and net dollars per hour, and a seven-step farming plan.
 - `data.js` — the same board data, written beside the page for the dashboard to read.
-- `dashboard/` — a static page: the board is sortable, filterable and searchable, and each protocol opens a detail view.
+- `dashboard/` — a static page: an evidence board (validation numbers, the 758-protocol ledger, the integrity strip) above a board that is sortable, filterable and searchable, and each protocol opens a full dossier with its value breakdown, nearest traded peers, a deposit-by-drop-share matrix, and its farm economics.
 - `screenshots/` — three screenshots rendered from the dashboard's own files. See [SCREENSHOTS.md](SCREENSHOTS.md).
 - `dossier.json` — the submission summary, built with `buildDossier` from `vendor/makefun-board.ts`.
 
 ## How the value is estimated
 
 The model fits a robust log-log regression of market cap on TVL across the protocols in the same snapshot that already trade, with one pass that trims outliers, then applies the fitted line to the pre-token protocols. Three multipliers adjust the result: one for seven-day TVL growth, one for how long the protocol has existed, and one for its category — the category's median market-cap-to-TVL ratio against the whole traded set, shrunk by n/(n+5), for categories with at least three traded protocols. No protocol list is hard-coded anywhere; every number comes from the snapshot. On the kit snapshot the fit covers 114 protocols at R-squared 0.32, and the dashboard states the fit and its validation error in plain words rather than dressing them up.
+
+A second model, fitted on the same snapshot's traded protocols, estimates the chance a protocol launches a token at all: a logistic regression on log TVL, age, seven-day growth and sector, with L2 shrinkage (lambda 10). Its Brier score is 0.209 against the base rate's 0.249 on the kit snapshot, and it beats the base rate in both directions of a split-half check (0.218 vs 0.249; 0.232 vs 0.253). Expected value is the if-launched value times the fitted odds, so a large protocol with long odds ranks below a smaller one that is likely to launch: Steakhouse Financial's $66.1M if-launched value becomes $20.0M at 30% odds. The odds are genuinely fitted and validated, never a hand-written column.
+
+Uncertainty is bootstrapped, not asserted: 200 seeded resamples refit the comps line and the odds fit, and each row carries the P10–P90 range of its expected value and the range of ranks it takes across the resamples. On the kit snapshot 9 of the top 20 stay in the top 20 in at least 80% of refits — the ranks move, and the dashboard says so.
 
 ## Validation
 
@@ -33,6 +37,7 @@ Because the split is by slug order rather than by size or category, the checked 
 The R-squared of 0.318 tells the same story from the other side: TVL and category together account for about thirty-two percent of the variation in log market cap, and the rest is everything a launch price depends on that TVL cannot see.
 Both numbers travel with the entry: the fit result carries the sample size, the coefficients, the R-squared, and the holdout error, and the dashboard prints all of them on the page beside the chart.
 The category adjustment earned its place on the holdout rather than being asserted: per-category regression lines and per-category intercept shifts were tried under the same split-half protocol and did not beat the plain line, while the shrunk ratio multiplier did — median error 2.69 against 2.77, holdout R-squared 0.319 against 0.274 — and the reverse split agrees, so it ships and the others do not.
+The dashboard lists five validation checks and passes four. The one it fails is named on the page: under leave-one-out the adjusted line's median error is x3.17 against the plain line's x3.13, so the category adjustment does not earn its keep under leave-one-out even though it wins the split-half. The 80% interval covers 80.7% of the held-out half (n=57), inside the 65–95% band it promises. A check that fails is shown, not dropped: a validation table that only ever passes is not a validation.
 When a snapshot is too thin to fit, the holdout is skipped and the fallback flag is set, so the dashboard never shows a validation number for a line that was never fitted.
 Re-running the holdout on a different snapshot gives a different error factor, because the line, the trim, and the split are all refitted from whatever snapshot the program is handed.
 
@@ -50,6 +55,10 @@ The plan's first step keeps farming funds in a fresh wallet with its seed phrase
 Costs and times are estimates in dollars and minutes, not promises: gas prices move, and the plan says about rather than exact wherever the chain rather than the protocol sets the price.
 The tiers are derived from the protocol's own record on every run, so the same plan generator prices a fifty-dollar position on a small young protocol and a two-hundred-and-fifty-dollar position on a large one without any hand-written list of names.
 Because the economics panel is computed from the same tiers as the plan steps, the numbers in the detail view and the numbers in the board's plan text always agree with each other.
+
+## Farm verdicts and scenarios
+
+Each row carries a verdict — FARM, MARGINAL, or SKIP — from the plan's own arithmetic, not from a slogan. The expected allocation is the expected value times a drop share, net of the plan's gas, per hour of hands-on time. The default drop share is 0.001%: a 5% community allocation split across about 5,000 qualifying wallets. FARM means the net is positive and at least $5 an hour; MARGINAL means positive but slower; SKIP means the gas alone eats the expectation. On the kit snapshot the default scenario gives 76 FARM, 31 MARGINAL and 119 SKIP, with the best net at $142 an hour. The board's drop-share and horizon controls re-price every verdict live, and each protocol's dossier shows the verdict at the current scenario plus a deposit-by-drop-share matrix, so a reader can see exactly which assumption a verdict depends on. The 0.1% drop share the previous version used made all 226 rows FARM; it was not a verdict, it was an assumption too generous to discriminate, and it was replaced once the numbers showed it.
 
 ## Running it
 
