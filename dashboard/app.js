@@ -1,6 +1,6 @@
 // Token Radar's dashboard. Reads window.RADAR (written beside dashboard/ by main.ts) and renders
 // the evidence board, the ranked table, the fitted model with its chart, and a per-protocol dossier
-// with the model's inputs, nearest peers, farm economics and the farm plan. No network: every byte
+// with the model's inputs, peers, farm economics and plan. No network: every byte
 // it shows is in data.js. The page recomputes every expected value from the snapshot figures with
 // the same arithmetic main.ts runs, so the page and board.json agree.
 (function () {
@@ -179,7 +179,7 @@
     return rest === 0 ? h + 'h' : h + 'h ' + rest + 'm';
   }
 
-  // The verdict, from the plan's own arithmetic: expected value x drop share, net of gas, per hour. Mirrors lib/model.ts.
+  // The verdict, from the plan's own arithmetic. Mirrors lib/model.ts.
   function scenarioEcon(p, horizonDays) {
     var capital = capitalFor(p);
     var second = secondChainOf(p);
@@ -329,8 +329,8 @@
     );
   }
 
-  // The evidence board: KPI strip, 758-protocol ledger, validation table with its failing check
-  // named, integrity strip. Divs, not a table: the smoke test counts the board's rows by <tr>.
+  // The evidence board: KPI strip, top-farm strip, 758-protocol ledger, validation table,
+  // integrity strip. Divs, not a table: the smoke test counts the board's rows by <tr>.
   function evidence() {
     var v = DATA.validation || {};
     var o = DATA.odds || {};
@@ -345,6 +345,9 @@
       kpi('FARM rows', String(DATA.farmable_rows), 'default scenario'),
       kpi('Best net/h', DATA.best_net_per_hour_usd !== undefined ? '$' + DATA.best_net_per_hour_usd.toFixed(0) : 'n/a', 'net of gas')
     );
+    // Top farm rows by net $/h, on the first screen. Default scenario, from the board.
+    var topFarm = DATA.rows.filter(function (r) { return r.verdict === 'FARM'; }).sort(function (a, b) { return b.net_per_hour_usd - a.net_per_hour_usd; }).slice(0, 5).map(function (r) { return r.name + ' $' + Math.round(r.net_per_hour_usd) + '/h'; }).join(' · ');
+    var farmTop = el('p', { class: 'integrity', text: 'Top farm by net $/h: ' + topFarm });
     var ledger = (DATA.ledger || []).map(function (g) {
       return el('div', { class: 'ledger-row' },
         el('span', { class: 'ledger-label', text: g.label }),
@@ -378,14 +381,14 @@
     );
     return el('section', { class: 'evidence' },
       kpis,
+      farmTop,
       el('div', { class: 'ledger' }, el('h2', { text: 'The whole snapshot: 758 protocols' }), ledger),
       validation,
       integrity
     );
   }
 
-  // One helper builds every select in the controls: [value, label] pairs, the current value,
-  // and what to store when it changes. The scenario selects re-price every verdict.
+  // One helper builds every select in the controls. The scenario selects re-price every verdict.
   function mkSel(id, label, pairs, cur, onChange) {
     var s = el('select', { id: id, 'aria-label': label },
       pairs.map(function (p) { return el('option', { value: String(p[0]), text: p[1], selected: p[0] === cur ? 'selected' : null }); })
