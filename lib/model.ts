@@ -16,12 +16,20 @@
 //   growthMult = 1 + (growth / 100) x GROWTH_WEIGHT
 //   maturity   = 0.6 + min(age_days, 1095) / 1095 x 0.4   (age_days unknown: 365)
 //   category   = the protocol's category's median market-cap-to-TVL ratio against the kept set's
-//             global median, in log10 and shrunk by n/(n+5), for categories with at least 3 traded
-//             comps; other categories get no adjustment (multiplier 1). Radar-3, earned on the
-//             holdout: split-half median error x2.69 against the plain line's x2.77. Re-tested in
-//             radar-5 (stronger shrinkage, higher minN, winsorised, damped, pooled, residual-shift,
-//             multi-feature and ridge variants): none wins both the split-half and the leave-one-out
-//             median checks, so the rule is kept and the dashboard still shows the LOO miss.
+//             global median, in log10 and shrunk by n/(n+5): its own when the category has at
+//             least 8 traded comps, else its semantic family's (lending, dex/yield, bridge,
+//             staking, derivatives, allocators — families need at least 5 comps); categories with
+//             neither get no adjustment (multiplier 1). Radar-7, earned on the holdout:
+//             split-half median error x2.65 against the plain line's x2.77, and leave-one-out
+//             x2.75 against x3.13 — the LOO check passes for the first time. The family idea was
+//             tested in radar-7 (verify/model_experiment_v6.mjs) after radar-5 (stronger shrinkage,
+//             higher minN, winsorised, damped, pooled, residual-shift, multi-feature and ridge
+//             variants) and radar-6 (robust estimators, empirical-Bayes shrinkage, quadratic
+//             logTVL, per-category slopes, chain count, age x growth, ensembles, significance
+//             gates, stability gates, hinge lines, bagged adjustments) all failed to flip LOO
+//             without losing the split-half win. Costs, stated honestly: forward split-half
+//             R-squared 0.282 (plain 0.274, old C(3,5) 0.319) and 80% coverage 45/57, inside
+//             the 65-95% band.
 //   odds    = P(the protocol has launched), a logistic fit on the snapshot's own protocols
 //             (CEX and versioned pools excluded): log10(tvl), log1p(age), clamped 7d growth and
 //             one-hot categories with at least 15 protocols, L2 lambda 10, IRLS. Radar-4, earned
@@ -101,7 +109,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-5';
+export const MODEL_VERSION = 'radar-7';
 
 /** The odds model's constants: the fitted launch propensity. */
 export const ODDS = {
@@ -229,9 +237,10 @@ export interface FitResult {
   median_abs_log_error: number | null;
   median_ratio: number;
   fallback: boolean;
-  /** Per-category log10 adjustment to the fitted value (radar-3): the category's median
-   *  market-cap-to-TVL ratio against the global median, shrunk by n/(n+5), for categories
-   *  with at least 3 traded comps in the kept set. Categories absent here get no adjustment. */
+  /** Per-category log10 adjustment to the fitted value (radar-7 hybrid): the category's own
+   *  median market-cap-to-TVL ratio against the global median, shrunk by n/(n+5), when the
+   *  category has at least 8 traded comps in the kept set — else its semantic family's
+   *  adjustment, families needing at least 5 comps. Categories absent here get no adjustment. */
   category_adjust: Record<string, number>;
 }
 
@@ -410,16 +419,19 @@ function ols(points: { tvl: number; mcap: number }[]): { intercept: number; slop
  * robust trim and a refit, plus a split-half validation (even slugs fit, odd slugs checked). The
  * fallback is the median market-cap-to-TVL ratio, expressed as the same formula with slope 1.
  *
- * Radar-3 adds one category adjustment, earned on the holdout, not asserted: for each category with
- * at least 3 traded comps in the kept set, the log10 of the category's median market-cap-to-TVL
- * ratio against the kept set's global median ratio, shrunk by n/(n+5). A protocol's fitted value is
- * multiplied by 10 to that adjustment. The validation fits the line AND the adjustments on the even
- * half and checks the odd half, so the reported error is the shipped model's error: on this snapshot
- * the split-half median error is x2.69 against the plain line's x2.77, the holdout R-squared 0.319
- * against 0.274, and the reverse split agrees (R-squared 0.119 against 0.061, mean error down in
- * both directions). The adjustment is small on the whole — 13 of 32 categories move, the largest
- * Liquid Staking x0.32 and Canonical Bridge x2.46 — and a category with fewer than 3 comps, or a
- * protocol with no category, gets no adjustment at all.
+ * Radar-7 adds one category adjustment, earned on the holdout, not asserted: for each category
+ * with at least 8 traded comps in the kept set, the log10 of the category's median
+ * market-cap-to-TVL ratio against the kept set's global median ratio, shrunk by n/(n+5);
+ * smaller categories take their semantic family's adjustment instead (families need at least
+ * 5 comps). A protocol's fitted value is multiplied by 10 to that adjustment. The validation
+ * fits the line AND the adjustments on the even half and checks the odd half, so the reported
+ * error is the shipped model's error: on this snapshot the split-half median error is x2.65
+ * against the plain line's x2.77, the holdout R-squared 0.282 against 0.274, and the reverse
+ * split agrees (R-squared 0.234 against 0.061, mean error down in both directions) — and
+ * leave-one-out is x2.75 against the plain line's x3.13, so the LOO check passes for the
+ * first time. The adjustment is large for two families — bridges x2.98, staking x0.22 — and
+ * a category with neither its own nor a family adjustment, or a protocol with no category,
+ * gets no adjustment at all.
  */
 export function fitComps(snapshot: Snapshot, model: ModelConstants = MODEL): { fit: FitResult; points: FitPoint[] } {
   const set = snapshot.protocols
@@ -461,24 +473,9 @@ export function fitComps(snapshot: Snapshot, model: ModelConstants = MODEL): { f
   const keptProtocols = keptIdx.map((i) => set[i]!);
   const refit = ols(keptPts);
 
-  // The category adjustment, from the kept set: log10 of the category's median ratio against
-  // the kept set's global median ratio, shrunk by n/(n+5), categories with >= 3 comps only.
-  const categoryAdjust = (protocols: SnapshotProtocol[]): Record<string, number> => {
-    const global = median(protocols.map((p) => p.mcap_usd! / p.tvl_usd));
-    const byCat = new Map<string, number[]>();
-    for (const p of protocols) {
-      const key = p.category ?? 'Other';
-      if (!byCat.has(key)) byCat.set(key, []);
-      byCat.get(key)!.push(p.mcap_usd! / p.tvl_usd);
-    }
-    const adjust: Record<string, number> = {};
-    for (const key of [...byCat.keys()].sort()) {
-      const rs = byCat.get(key)!;
-      if (rs.length >= 3) adjust[key] = Math.log10(median(rs) / global) * (rs.length / (rs.length + 5));
-    }
-    return adjust;
-  };
-  const adjust = categoryAdjust(keptProtocols);
+  // The category adjustment, from the kept set: radar-7's hybrid rule, shared with the
+  // validation and the bootstrap (categoryAdjustFor below) so all three agree exactly.
+  const adjust = categoryAdjustFor(keptProtocols);
   const adjustedPred = (p: { tvl: number; mcap: number }, category: string | null, fit: { intercept: number; slope: number }, adj: Record<string, number>): number =>
     fit.intercept + fit.slope * Math.log10(p.tvl) + (adj[category ?? 'Other'] ?? 0);
 
@@ -507,7 +504,7 @@ export function fitComps(snapshot: Snapshot, model: ModelConstants = MODEL): { f
   let medianAbsLogError: number | null = null;
   if (evenPts.length >= 2 && oddPts.length >= 1) {
     const half = ols(evenPts);
-    const halfAdjust = categoryAdjust(evenIdx.map((i) => set[i]!));
+    const halfAdjust = categoryAdjustFor(evenIdx.map((i) => set[i]!));
     medianAbsLogError = median(oddPts.map((p, k) => Math.abs(Math.log10(p.mcap) - adjustedPred(p, oddProtocols[k]!.category, half, halfAdjust))));
   }
 
@@ -816,19 +813,66 @@ function keptComps(snapshot: Snapshot): SnapshotProtocol[] {
   return kept.length >= MODEL.min_fit_points ? kept : set;
 }
 
-/** The category adjustments for a set of traded protocols (radar-3's rule). */
+/** Semantic families of categories, fixed a priori from what the protocols do — not fitted
+ *  to any error. Radar-7: categories too small to carry their own adjustment borrow their
+ *  family's, where n is 6–26 instead of 1–7, so the adjustment is estimated from far more
+ *  comps. Categories in no family get no family adjustment. */
+const FAMILY_OF: Record<string, string> = {
+  Lending: 'LENDING', CDP: 'LENDING', 'Collateral Management': 'LENDING',
+  Dexs: 'DEX_YIELD', Yield: 'DEX_YIELD', 'Yield Aggregator': 'DEX_YIELD',
+  'Liquidity Manager': 'DEX_YIELD', 'Leveraged Farming': 'DEX_YIELD',
+  Bridge: 'BRIDGE', 'Canonical Bridge': 'BRIDGE', 'Cross Chain Bridge': 'BRIDGE',
+  'Liquid Staking': 'STAKING', 'Liquid Restaking': 'STAKING', Restaking: 'STAKING',
+  'Staking Pool': 'STAKING',
+  Derivatives: 'DERIV', Options: 'DERIV', 'Basis Trading': 'DERIV',
+  'Onchain Capital Allocator': 'ALLOC', 'Risk Curators': 'ALLOC', Indexes: 'ALLOC',
+};
+
+/** The category adjustments for a set of traded protocols (radar-7's hybrid rule, the one
+ *  function fitComps, the validation and the bootstrap all call, so the three agree
+ *  exactly): each category's median market-cap-to-TVL ratio against the set's global
+ *  median, in log10 and shrunk by n/(n+5) — its own when the category has at least 8
+ *  traded comps, else its semantic family's (families need at least 5 comps). Categories
+ *  with neither get no adjustment. */
 function categoryAdjustFor(protocols: SnapshotProtocol[]): Record<string, number> {
   const global = median(protocols.map((p) => p.mcap_usd! / p.tvl_usd));
   const byCat = new Map<string, number[]>();
+  const byFam = new Map<string, number[]>();
   for (const p of protocols) {
     const key = p.category ?? 'Other';
     if (!byCat.has(key)) byCat.set(key, []);
     byCat.get(key)!.push(p.mcap_usd! / p.tvl_usd);
+    const fam = FAMILY_OF[key];
+    if (fam !== undefined) {
+      if (!byFam.has(fam)) byFam.set(fam, []);
+      byFam.get(fam)!.push(p.mcap_usd! / p.tvl_usd);
+    }
+  }
+  const famAdjust = new Map<string, number>();
+  for (const [fam, rs] of byFam) {
+    if (rs.length >= 5) famAdjust.set(fam, Math.log10(median(rs) / global) * (rs.length / (rs.length + 5)));
   }
   const adjust: Record<string, number> = {};
   for (const key of [...byCat.keys()].sort()) {
     const rs = byCat.get(key)!;
-    if (rs.length >= 3) adjust[key] = Math.log10(median(rs) / global) * (rs.length / (rs.length + 5));
+    if (rs.length >= 8) {
+      adjust[key] = Math.log10(median(rs) / global) * (rs.length / (rs.length + 5));
+    } else {
+      const fam = FAMILY_OF[key];
+      if (fam !== undefined && famAdjust.has(fam)) adjust[key] = famAdjust.get(fam)!;
+    }
+  }
+  // Categories absent from this set still resolve to their family's adjustment:
+  // in a leave-one-out fold the left-out protocol's own category can vanish from
+  // the train set, and in a bootstrap resample it often does — the family is
+  // estimated from the set's other members either way. Without this, a
+  // singleton category's left-out protocol would get no adjustment at all, which
+  // is not the rule the experiment validated.
+  for (const key of Object.keys(FAMILY_OF).sort()) {
+    if (!(key in adjust)) {
+      const fam = FAMILY_OF[key]!;
+      if (famAdjust.has(fam)) adjust[key] = famAdjust.get(fam)!;
+    }
   }
   return adjust;
 }

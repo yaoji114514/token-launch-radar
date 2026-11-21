@@ -3,7 +3,7 @@
 // It reads the sealed snapshot, writes the ranked board, the dashboard data, the
 // dashboard page, the screenshots and the dossier, and does it deterministically:
 // standard library only, no network, the same snapshot always yields the same bytes.
-// Valuation and farming plans live in the radar-5 model in lib/model.ts; this file
+// Valuation and farming plans live in the radar-7 model in lib/model.ts; this file
 // only drives the run and assembles the output.
 //
 // A working token-radar-01 entry (Node 22, standard library only).
@@ -99,6 +99,6 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEX
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
-    `token radar: radar-5 expected value: top ${board[0]!.slug} $${board[0]!.implied_value_usd} (if launched $${board[0]!.implied_if_launched_usd}, odds ${board[0]!.launch_odds}); odds Brier ${radar.odds.brier.toFixed(4)} vs base ${radar.odds.base_brier.toFixed(4)} (split-half ${radar.odds.brier_fwd.toFixed(4)}/${radar.odds.brier_rev.toFixed(4)}); ${radar.farmable_rows} FARM rows at the default scenario\n` +
+    `token radar: radar-7 expected value: top ${board[0]!.slug} $${board[0]!.implied_value_usd} (if launched $${board[0]!.implied_if_launched_usd}, odds ${board[0]!.launch_odds}); odds Brier ${radar.odds.brier.toFixed(4)} vs base ${radar.odds.base_brier.toFixed(4)} (split-half ${radar.odds.brier_fwd.toFixed(4)}/${radar.odds.brier_rev.toFixed(4)}); ${radar.farmable_rows} FARM rows at the default scenario\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

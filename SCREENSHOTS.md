@@ -1,10 +1,10 @@
-# Screenshots: regenerated from the built dashboard (2026-11-20, radar-5 build)
+# Screenshots: regenerated from the built dashboard (2026-11-21, radar-7 build)
 
 The three JPEGs in `screenshots/` are real captures of this entry's dashboard,
 taken with the headless-shell Chromium via `../shots/capture.mjs`:
 
-- `1-board.jpg` — the evidence board (KPI strip, 758-protocol ledger, validation table, ranked board)
-- `2-detail.jpg` — the detail dossier for the rank-1 protocol (veda)
+- `1-board.jpg` — the evidence board (KPI strip, top-farm strip, 758-protocol ledger, validation table, ranked board)
+- `2-detail.jpg` — the detail dossier for the rank-1 protocol (usdd)
 - `3-farm.jpg` — the FARM view: the board sorted by net dollars per hands-on hour
 
 All are 1440x900 JPEG, each under the 512 KiB cap. The capture script picks the
