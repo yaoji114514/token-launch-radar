@@ -25,7 +25,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSyn
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
+import { CALIBRATED_MODEL, MATURITY_MODEL, MODEL, boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
 import { buildDossier } from './vendor/makefun-board.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -50,9 +50,16 @@ if (!existsSync(inputFile)) {
   process.exit(2);
 }
 const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
+const modelName = arg('model', 'radar-9');
+const models = new Map([['radar-7', MODEL], ['radar-8', CALIBRATED_MODEL], ['radar-9', MATURITY_MODEL]]);
+const model = models.get(modelName);
+if (!model) {
+  process.stderr.write('token radar: --model must be radar-7, radar-8 or radar-9\n');
+  process.exit(2);
+}
 
 const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
-const { board, radar } = buildRadar(snapshot);
+const { board, radar } = buildRadar(snapshot, model);
 const issue = boardIssue(board, snapshot);
 if (issue !== null) {
   process.stderr.write(`token radar: the model wrote a board the gate refuses: ${issue}\n`);
@@ -99,6 +106,6 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEX
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
-    `token radar: radar-7 expected value: top ${board[0]!.slug} $${board[0]!.implied_value_usd} (if launched $${board[0]!.implied_if_launched_usd}, odds ${board[0]!.launch_odds}); odds Brier ${radar.odds.brier.toFixed(4)} vs base ${radar.odds.base_brier.toFixed(4)} (split-half ${radar.odds.brier_fwd.toFixed(4)}/${radar.odds.brier_rev.toFixed(4)}); ${radar.farmable_rows} FARM rows at the default scenario\n` +
+    `token radar: ${radar.model_version} expected value: top ${board[0]!.slug} $${board[0]!.implied_value_usd} (if launched $${board[0]!.implied_if_launched_usd}, odds ${board[0]!.launch_odds}); odds Brier ${radar.odds.brier.toFixed(4)} vs base ${radar.odds.base_brier.toFixed(4)} (split-half ${radar.odds.brier_fwd.toFixed(4)}/${radar.odds.brier_rev.toFixed(4)}); ${radar.farmable_rows} FARM rows at the default scenario\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );
