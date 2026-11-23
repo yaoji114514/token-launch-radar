@@ -947,72 +947,60 @@ function fitCompLine(rows: SnapshotProtocol[], asOf: string, model: ModelConstan
   // Keep the v8 anchor identifiable: with a free intercept, multiplying both
   // maturity endpoints and offsetting the intercept would give the same fit.
   const anchor = model.fit_maturity ? { ...model, maturity_floor: 1, maturity_range: 0 } : model;
+  const residuals = rows.map((row) => Math.log10(row.mcap_usd!) - validationPrediction(row, line, asOf, anchor, true));
+  line.intercept += balancedShift(residuals);
+  if (model.fit_maturity) line.maturity_fit = fitMaturity(rows, line, asOf, anchor);
+  return line;
+}
+
+function balancedShift(residuals: number[]): number {
   let high = 0;
   let low = 0;
-  for (const row of rows) {
-    const error = Math.log10(row.mcap_usd!) - validationPrediction(row, line, asOf, anchor, true);
+  for (const error of residuals) {
     const clipped = Math.min(1.75, Math.max(-1.75, error));
     high += Math.pow(10, clipped);
     low += Math.pow(10, -clipped);
   }
-  const shift = 0.5 * Math.log10(high / low) * rows.length / (rows.length + 10);
-  line.intercept += shift;
-  if (model.fit_maturity) {
-    line.maturity_fit = fitMaturity(rows, line, asOf, anchor);
-  }
-  return line;
+  return 0.5 * Math.log10(high / low) * residuals.length / (residuals.length + 10);
 }
 
 /**
- * Regularized least squares for log market-cap residuals with
- * maturity = floor + range*t. Profile the log floor out for each old/new
- * ratio. Fitting in log space keeps both endpoints positive.
+ * Estimate the age gradient from dated comps. Balance the value residuals
+ * after applying that gradient to all training rows to estimate the floor.
  */
 function fitMaturity(rows: SnapshotProtocol[], line: CompLine, asOf: string, anchor: ModelConstants): FitResult['maturity_fit'] {
-  const points: { age: number; residual: number }[] = [];
-  for (const row of rows) {
+  const points = rows.map((row) => {
     const age = ageDays(asOf, row.listed_at);
-    if (age === null) continue;
-    const residual = Math.log(row.mcap_usd!) - Math.LN10 * validationPrediction(row, line, asOf, anchor, true);
-    points.push({ age: ageFraction(age, anchor), residual });
-  }
-  if (points.length < 2 || points.every((p) => p.age === points[0]!.age)) return undefined;
+    return {
+      dated: age !== null,
+      age: ageFraction(age ?? anchor.unknown_age_days, anchor),
+      residual: Math.log10(row.mcap_usd!) - validationPrediction(row, line, asOf, anchor, true),
+    };
+  });
+  const dated = points.filter((p) => p.dated);
+  if (dated.length < 2 || dated.every((p) => p.age === dated[0]!.age)) return undefined;
 
-  // Use the original maturity span as the prior scale for the size of an age
-  // effect. Estimate noise from the training fold so weaker evidence gets
-  // more shrinkage toward a neutral multiplier.
-  const center = median(points.map((p) => p.residual));
-  const noise = 1.4826 * median(points.map((p) => Math.abs(p.residual - center)));
-  const priorScale = -Math.log(MODEL.maturity_floor);
-  const penalty = (noise / priorScale) ** 2;
-  function profile(logRatio: number) {
-    const ratio = Math.exp(logRatio);
-    const errors = points.map((p) => p.residual - Math.log(1 - p.age + p.age * ratio));
-    const logFloor = average(errors) * points.length / (points.length + penalty);
-    const loss = errors.reduce((sum, error) => sum + (error - logFloor) ** 2, 0)
-      + penalty * (logFloor ** 2 + logRatio ** 2);
-    return { logRatio, logFloor, loss };
+  const center = median(dated.map((p) => p.residual));
+  const noise = 1.4826 * median(dated.map((p) => Math.abs(p.residual - center)));
+  const ageCenter = average(dated.map((p) => p.age));
+  const spread = 1.345 * noise;
+  // A zero-centered prior on the log10 endpoint ratio. The penalty rises
+  // with residual noise, so small or noisy folds supply less age leverage.
+  const priorSdDex = 0.05;
+  let ageSumSquares = (noise / priorSdDex) ** 2;
+  let covariance = 0;
+  for (const p of dated) {
+    const centeredAge = p.age - ageCenter;
+    const residual = Math.min(center + spread, Math.max(center - spread, p.residual));
+    ageSumSquares += centeredAge ** 2;
+    covariance += centeredAge * residual;
   }
-
-  // Search a coarse grid before refining the best bracket. The wide endpoint
-  // bound keeps extrapolation finite for a nearly degenerate fold.
-  const limit = 12;
-  let best = profile(0);
-  for (let q = -limit; q <= limit; q++) {
-    const candidate = profile(q);
-    if (candidate.loss < best.loss) best = candidate;
-  }
-  let left = Math.max(-limit, best.logRatio - 1);
-  let right = Math.min(limit, best.logRatio + 1);
-  for (let i = 0; i < 42; i++) {
-    const low = profile((2 * left + right) / 3);
-    const high = profile((left + 2 * right) / 3);
-    if (low.loss <= high.loss) right = high.logRatio;
-    else left = low.logRatio;
-  }
-  const fit = profile((left + right) / 2);
-  const floor = Math.exp(fit.logFloor);
-  return { floor, range: floor * Math.expm1(fit.logRatio), n: points.length };
+  const logRatio = covariance / ageSumSquares;
+  const delta = Math.expm1(Math.LN10 * logRatio);
+  const level = balancedShift(points.map((p) => p.residual - Math.log1p(p.age * delta) / Math.LN10))
+    - balancedShift(points.map((p) => p.residual));
+  const floor = Math.pow(10, level);
+  return { floor, range: floor * delta, n: dated.length };
 }
 
 const average = (values: number[]) => values.reduce((sum, x) => sum + x, 0) / values.length;

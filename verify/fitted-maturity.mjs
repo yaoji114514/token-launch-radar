@@ -81,8 +81,9 @@ const vedaCounterfactual = impliedValue(veda, asOf, {
   maturity_range: MODEL.maturity_range,
 }, v8.radar.fit, vedaRow(v8).launch_odds);
 const lift = vedaRow(v8).implied_value_usd - vedaRow(v7).implied_value_usd;
+const accepted = Object.values(checks).every(Boolean);
 console.log(JSON.stringify({
-  accepted: Object.values(checks).every(Boolean),
+  accepted,
   checks,
   maturity: v9.radar.fit.maturity_fit,
   radar7Published: legacy,
@@ -101,3 +102,4 @@ console.log(JSON.stringify({
     shareOfV8LiftFromRemovingMaturity: (vedaRow(v8).implied_value_usd - vedaCounterfactual.expected) / lift,
   },
 }, null, 2));
+if (!accepted) process.exitCode = 1;
