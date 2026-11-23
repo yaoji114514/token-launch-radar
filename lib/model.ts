@@ -83,6 +83,8 @@ export interface Snapshot {
 
 /** The model's constants, as the dashboard states them. */
 export interface ModelConstants {
+  calibrated?: true;
+  growth_exponent?: number;
   growth_weight: number;
   growth_floor: number;
   growth_cap: number;
@@ -106,6 +108,14 @@ export const MODEL: ModelConstants = {
   trim_k: 2.5,
   min_fit_points: 20,
   fallback_multiple: 0.25,
+};
+
+export const CALIBRATED_MODEL: ModelConstants = {
+  ...MODEL,
+  calibrated: true,
+  growth_exponent: 0.5,
+  maturity_floor: 1,
+  maturity_range: 0,
 };
 
 /** The model's version label: the dashboard names it. */
@@ -434,13 +444,9 @@ function ols(points: { tvl: number; mcap: number }[]): { intercept: number; slop
  * gets no adjustment at all.
  */
 export function fitComps(snapshot: Snapshot, model: ModelConstants = MODEL): { fit: FitResult; points: FitPoint[] } {
-  const set = snapshot.protocols
-    .filter((p) => !isPreToken(p) && (p.mcap_usd ?? 0) > 0 && p.tvl_usd > 0 && p.category !== 'CEX' && !VERSIONED.test(p.name))
-    .sort(bySlugOrder);
+  const set = tradedComps(snapshot);
   const ratios = set.map((p) => p.mcap_usd! / p.tvl_usd);
   const medianRatio = set.length > 0 ? median(ratios) : model.fallback_multiple;
-  const pts = set.map((p) => ({ tvl: p.tvl_usd, mcap: p.mcap_usd! }));
-
   if (set.length < model.min_fit_points) {
     return {
       fit: {
@@ -458,69 +464,46 @@ export function fitComps(snapshot: Snapshot, model: ModelConstants = MODEL): { f
     };
   }
 
-  const first = ols(pts);
-  const residuals = pts.map((p) => Math.log10(p.mcap) - (first.intercept + first.slope * Math.log10(p.tvl)));
-  const med = median(residuals);
-  const mad = median(residuals.map((r) => Math.abs(r - med)));
-  const limit = model.trim_k * 1.4826 * mad;
-  let keptIdx = pts.map((_, i) => i);
-  if (mad > 0) {
-    const trimmed = pts.map((_, i) => i).filter((i) => Math.abs(residuals[i]! - med) <= limit);
-    if (trimmed.length >= model.min_fit_points) keptIdx = trimmed;
-  }
-  const keptSet = new Set(keptIdx);
-  const keptPts = keptIdx.map((i) => pts[i]!);
-  const keptProtocols = keptIdx.map((i) => set[i]!);
-  const refit = ols(keptPts);
-
-  // The category adjustment, from the kept set: radar-7's hybrid rule, shared with the
-  // validation and the bootstrap (categoryAdjustFor below) so all three agree exactly.
-  const adjust = categoryAdjustFor(keptProtocols);
-  const adjustedPred = (p: { tvl: number; mcap: number }, category: string | null, fit: { intercept: number; slope: number }, adj: Record<string, number>): number =>
-    fit.intercept + fit.slope * Math.log10(p.tvl) + (adj[category ?? 'Other'] ?? 0);
+  const keptProtocols = keptComps(snapshot, model, set);
+  const keptSet = new Set(keptProtocols);
+  const refit = fitCompLine(keptProtocols, snapshot.as_of, model);
 
   // R-squared of the shipped (adjusted) line on the kept set.
   const adjustedR2 = (() => {
     let my = 0;
-    for (const p of keptPts) my += Math.log10(p.mcap);
-    my /= keptPts.length;
+    for (const p of keptProtocols) my += Math.log10(p.mcap_usd!);
+    my /= keptProtocols.length;
     let ssr = 0, sst = 0;
-    keptPts.forEach((p, k) => {
-      const y = Math.log10(p.mcap);
-      const r = y - adjustedPred(p, keptProtocols[k]!.category, refit, adjust);
+    for (const p of keptProtocols) {
+      const y = Math.log10(p.mcap_usd!);
+      const r = y - validationPrediction(p, refit, snapshot.as_of, model, !!model.calibrated, 0);
       ssr += r * r;
       sst += (y - my) * (y - my);
-    });
+    }
     return sst === 0 ? 0 : 1 - ssr / sst;
   })();
 
   // Split-half validation of the shipped model: fit the line AND the adjustments on the even-kept
   // slugs, check the odd-kept ones.
-  const evenIdx = keptIdx.filter((_, k) => k % 2 === 0);
-  const oddIdx = keptIdx.filter((_, k) => k % 2 === 1);
-  const evenPts = evenIdx.map((i) => pts[i]!);
-  const oddPts = oddIdx.map((i) => pts[i]!);
-  const oddProtocols = oddIdx.map((i) => set[i]!);
+  const even = keptProtocols.filter((_, k) => k % 2 === 0);
+  const odd = keptProtocols.filter((_, k) => k % 2 === 1);
   let medianAbsLogError: number | null = null;
-  if (evenPts.length >= 2 && oddPts.length >= 1) {
-    const half = ols(evenPts);
-    const halfAdjust = categoryAdjustFor(evenIdx.map((i) => set[i]!));
-    medianAbsLogError = median(oddPts.map((p, k) => Math.abs(Math.log10(p.mcap) - adjustedPred(p, oddProtocols[k]!.category, half, halfAdjust))));
+  if (even.length >= 2 && odd.length >= 1) {
+    const half = fitCompLine(even, snapshot.as_of, model);
+    medianAbsLogError = median(odd.map((p) => Math.abs(Math.log10(p.mcap_usd!) - validationPrediction(p, half, snapshot.as_of, model, !!model.calibrated, 0))));
   }
 
   return {
     fit: {
       n_total: set.length,
-      n: keptPts.length,
-      intercept: refit.intercept,
-      slope: refit.slope,
+      n: keptProtocols.length,
+      ...refit,
       r2: adjustedR2,
       median_abs_log_error: medianAbsLogError,
       median_ratio: medianRatio,
       fallback: false,
-      category_adjust: adjust,
     },
-    points: set.map((p, i) => ({ tvl_usd: p.tvl_usd, mcap_usd: p.mcap_usd!, kept: keptSet.has(i), slug: p.slug, name: p.name, category: p.category })),
+    points: set.map((p) => ({ tvl_usd: p.tvl_usd, mcap_usd: p.mcap_usd!, kept: keptSet.has(p), slug: p.slug, name: p.name, category: p.category })),
   };
 }
 
@@ -703,18 +686,24 @@ export function impliedValue(
   fit: FitResult,
   odds: number | null = null,
 ): { implied: number; expected: number; odds: number; fitted: number; growthPct: number; growthMult: number; maturityMult: number; categoryMult: number; age: number | null } {
-  const age = ageDays(asOf, protocol.listed_at);
-  const rawGrowth = finite(protocol.change_7d, 0);
-  const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
-  const growthMult = 1 + (growthPct / 100) * model.growth_weight;
-  const ageForModel = age ?? model.unknown_age_days;
-  const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
+  const { age, growthPct, growthMult, maturityMult } = valueMultipliers(protocol, asOf, model);
   const fitted = fittedMcap(protocol.tvl_usd, fit);
-  const categoryMult = Math.pow(10, fit.category_adjust?.[protocol.category ?? 'Other'] ?? 0);
+  const category = protocol.category ?? 'Other';
+  const categoryMult = Math.pow(10, Object.hasOwn(fit.category_adjust, category) ? fit.category_adjust[category]! : 0);
   const implied = Math.max(1, Math.round(fitted * growthMult * maturityMult * categoryMult));
   const o = odds ?? 1;
   const expected = Math.max(1, Math.round(implied * o));
   return { implied, expected, odds: o, fitted, growthPct, growthMult, maturityMult, categoryMult, age };
+}
+
+function valueMultipliers(protocol: SnapshotProtocol, asOf: string, model: ModelConstants) {
+  const age = ageDays(asOf, protocol.listed_at);
+  const rawGrowth = finite(protocol.change_7d, 0);
+  const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
+  const growthMult = Math.pow(1 + (growthPct / 100) * model.growth_weight, model.growth_exponent ?? 1);
+  const ageForModel = age ?? model.unknown_age_days;
+  const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
+  return { age, growthPct, growthMult, maturityMult };
 }
 
 /** The headline sentence's figures: how many watchlist slugs, how many rows, how many live protocols. */
@@ -798,19 +787,23 @@ export function buildBoard(
 // Out-of-sample checks on the shipped comps line: leave-one-out of the
 // adjusted line, and the 80% interval coverage of the split-half fit.
 
-/** The kept comps set, as fitComps builds it: traded, mcap recorded, trimmed. */
-function keptComps(snapshot: Snapshot): SnapshotProtocol[] {
-  const set = snapshot.protocols
+function tradedComps(snapshot: Snapshot): SnapshotProtocol[] {
+  return snapshot.protocols
     .filter((p) => !isPreToken(p) && (p.mcap_usd ?? 0) > 0 && p.tvl_usd > 0 && p.category !== 'CEX' && !VERSIONED.test(p.name))
     .sort(bySlugOrder);
+}
+
+/** The kept comps set, shared by fitting, validation and bootstrap. */
+function keptComps(snapshot: Snapshot, model: ModelConstants, set = tradedComps(snapshot)): SnapshotProtocol[] {
+  if (set.length < model.min_fit_points) return set;
   const pts = set.map((p) => ({ tvl: p.tvl_usd, mcap: p.mcap_usd! }));
   const first = ols(pts);
   const residuals = pts.map((p) => Math.log10(p.mcap) - (first.intercept + first.slope * Math.log10(p.tvl)));
   const med = median(residuals);
   const mad = median(residuals.map((r) => Math.abs(r - med)));
-  const limit = MODEL.trim_k * 1.4826 * mad;
+  const limit = model.trim_k * 1.4826 * mad;
   const kept = set.filter((_, i) => mad <= 0 || Math.abs(residuals[i]! - med) <= limit);
-  return kept.length >= MODEL.min_fit_points ? kept : set;
+  return kept.length >= model.min_fit_points ? kept : set;
 }
 
 /** Semantic families of categories, fixed a priori from what the protocols do — not fitted
@@ -877,52 +870,157 @@ function categoryAdjustFor(protocols: SnapshotProtocol[]): Record<string, number
   return adjust;
 }
 
-function adjustedPred(tvl: number, category: string | null, fit: { intercept: number; slope: number }, adj: Record<string, number>): number {
-  return fit.intercept + fit.slope * Math.log10(Math.max(1, tvl)) + (adj[category ?? 'Other'] ?? 0);
+type CompLine = Pick<FitResult, 'intercept' | 'slope' | 'category_adjust'>;
+
+function validationPrediction(
+  p: SnapshotProtocol,
+  line: CompLine,
+  asOf: string,
+  model: ModelConstants,
+  fullValuation: boolean,
+  minimumTvl = 1,
+): number {
+  const category = p.category ?? 'Other';
+  const adjustment = Object.hasOwn(line.category_adjust, category) ? line.category_adjust[category]! : 0;
+  const base = line.intercept + line.slope * Math.log10(Math.max(minimumTvl, p.tvl_usd)) + adjustment;
+  if (!fullValuation) return base;
+  const { growthMult, maturityMult } = valueMultipliers(p, asOf, model);
+  return base + Math.log10(growthMult * maturityMult);
 }
 
-/** LOO median error, split-half plain-line error and 80% interval coverage of the shipped line. */
-export function compsValidation(snapshot: Snapshot): ValidationStats {
-  const kept = keptComps(snapshot);
-  const pts = kept.map((p) => ({ tvl: p.tvl_usd, mcap: p.mcap_usd! }));
-  // LOO: refit the line and the adjustments without each kept protocol in turn.
-  let loo: number | null = null;
-  let looPlain: number | null = null;
-  if (kept.length >= 3) {
-    const errs: number[] = [];
-    const errsPlain: number[] = [];
-    for (let k = 0; k < kept.length; k++) {
-      const rest = kept.filter((_, i) => i !== k);
-      const f = ols(rest.map((p) => ({ tvl: p.tvl_usd, mcap: p.mcap_usd! })));
-      const adj = categoryAdjustFor(rest);
-      const p = kept[k]!;
-      errs.push(Math.abs(Math.log10(p.mcap_usd!) - adjustedPred(p.tvl_usd, p.category, f, adj)));
-      errsPlain.push(Math.abs(Math.log10(p.mcap_usd!) - (f.intercept + f.slope * Math.log10(p.tvl_usd))));
-    }
-    loo = Math.pow(10, median(errs));
-    looPlain = Math.pow(10, median(errsPlain));
+/** A category estimate borrowing strength from other categories in its family. */
+function pooledResiduals(rows: SnapshotProtocol[], line: CompLine): Record<string, number> {
+  type Group = { sum: number; count: number };
+  const categories = new Map<string, Group>();
+  const families = new Map<string, Group>();
+  const zero = { sum: 0, count: 0 };
+  function add(groups: Map<string, Group>, label: string, residual: number) {
+    const group = groups.get(label) ?? zero;
+    groups.set(label, { sum: group.sum + residual, count: group.count + 1 });
   }
-  // Split-half: even-kept slugs fit, odd checked — plain line, and the 80% interval.
-  const even = kept.filter((_, k) => k % 2 === 0);
-  const odd = kept.filter((_, k) => k % 2 === 1);
-  let plain: number | null = null;
-  let coverage: number | null = null;
-  if (even.length >= 2 && odd.length >= 1) {
-    const half = ols(even.map((p) => ({ tvl: p.tvl_usd, mcap: p.mcap_usd! })));
-    plain = Math.pow(10, median(odd.map((p) => Math.abs(Math.log10(p.mcap_usd!) - (half.intercept + half.slope * Math.log10(p.tvl_usd))))));
-    const halfAdj = categoryAdjustFor(even);
-    const res = even.map((p) => Math.log10(p.mcap_usd!) - adjustedPred(p.tvl_usd, p.category, half, halfAdj));
-    const mean = res.reduce((a, v) => a + v, 0) / res.length;
-    const sd = Math.sqrt(res.reduce((a, v) => a + (v - mean) * (v - mean), 0) / Math.max(1, res.length - 1));
-    const z = 1.2816;
-    let inside = 0;
-    for (const p of odd) {
-      const pred = adjustedPred(p.tvl_usd, p.category, half, halfAdj);
-      if (Math.abs(Math.log10(p.mcap_usd!) - pred) <= z * sd) inside++;
-    }
-    coverage = inside / odd.length;
+  for (const row of rows) {
+    const category = row.category ?? 'Other';
+    const residual = Math.log10(row.mcap_usd!) - (line.intercept + line.slope * Math.log10(row.tvl_usd));
+    const clipped = Math.min(1.5, Math.max(-1.5, residual));
+    add(categories, category, clipped);
+    if (Object.hasOwn(FAMILY_OF, category)) add(families, FAMILY_OF[category]!, clipped);
   }
-  return { loo_median_factor: loo, loo_plain_factor: looPlain, split_half_factor: null, split_half_plain_factor: plain, coverage_80: coverage, coverage_n: odd.length, checks_passed: 0, checks_total: 0 };
+
+  const pooled: Record<string, number> = Object.create(null);
+  for (const category of [...new Set([...categories.keys(), ...Object.keys(FAMILY_OF)])].sort()) {
+    const own = categories.get(category) ?? zero;
+    const family = families.get(FAMILY_OF[category]!);
+    if (own.count === 0 && family === undefined) continue;
+    const prior = family ? (family.sum - own.sum) / (family.count - own.count + 5) : 0;
+    pooled[category] = (own.sum + 8 * prior) / (own.count + 8);
+  }
+  return pooled;
+}
+
+function fitCompLine(rows: SnapshotProtocol[], asOf: string, model: ModelConstants): CompLine {
+  const line = { ...ols(rows.map((p) => ({ tvl: p.tvl_usd, mcap: p.mcap_usd! }))), category_adjust: categoryAdjustFor(rows) };
+  if (!model.calibrated) return line;
+
+  const pooled = pooledResiduals(rows, line);
+  const legacy = line.category_adjust;
+  line.category_adjust = Object.fromEntries([...new Set([...Object.keys(legacy), ...Object.keys(pooled)])].sort().map((category) => [
+    category,
+    0.75 * (Object.hasOwn(legacy, category) ? legacy[category]! : 0) + 0.25 * (pooled[category] ?? 0),
+  ]));
+
+  // Balance the two tails of the multiplicative error on the training fold.
+  // Clip training residuals before the exponential and shrink the shift to zero.
+  let high = 0;
+  let low = 0;
+  for (const row of rows) {
+    const error = Math.log10(row.mcap_usd!) - validationPrediction(row, line, asOf, model, true);
+    const clipped = Math.min(1.75, Math.max(-1.75, error));
+    high += Math.pow(10, clipped);
+    low += Math.pow(10, -clipped);
+  }
+  const shift = 0.5 * Math.log10(high / low) * rows.length / (rows.length + 10);
+  return { ...line, intercept: line.intercept + shift };
+}
+
+const average = (values: number[]) => values.reduce((sum, x) => sum + x, 0) / values.length;
+
+function sampleSd(values: number[]): number {
+  const center = average(values);
+  return Math.sqrt(values.reduce((sum, x) => sum + (x - center) * (x - center), 0) / Math.max(1, values.length - 1));
+}
+
+function errorMetrics(errors: number[]) {
+  const abs = errors.map(Math.abs);
+  return {
+    medianFactor: Math.pow(10, median(abs)),
+    meanAbsLog: average(abs),
+    meanFactor: average(abs.map((error) => Math.pow(10, error))),
+  };
+}
+
+/** Evaluate both the published split and a fold-local trimming audit. */
+export function compsDiagnostics(
+  snapshot: Snapshot,
+  model: ModelConstants = MODEL,
+  fullValuation = !!model.calibrated,
+  foldLocalTrim = false,
+) {
+  const asOf = snapshot.as_of;
+  const traded = tradedComps(snapshot);
+  const kept = keptComps(snapshot, model, traded);
+  const cohort = foldLocalTrim ? traded : kept;
+  const even = cohort.filter((_, i) => i % 2 === 0);
+  const odd = cohort.filter((_, i) => i % 2 === 1);
+  const fitFold = (train: SnapshotProtocol[]) => {
+    const rows = foldLocalTrim ? keptComps(snapshot, model, train) : train;
+    const reference = fitCompLine(rows, asOf, MODEL);
+    const line = model.calibrated ? fitCompLine(rows, asOf, model) : reference;
+    const plain = { ...reference, category_adjust: {} };
+    const residual = (p: SnapshotProtocol) => Math.log10(p.mcap_usd!) - validationPrediction(p, line, asOf, model, fullValuation);
+    const plainResidual = (p: SnapshotProtocol) => Math.log10(p.mcap_usd!) - validationPrediction(p, plain, asOf, MODEL, false, 0);
+    return { rows, reference, residual, plainResidual };
+  };
+  const split = (train: SnapshotProtocol[], test: SnapshotProtocol[]) => {
+    if (train.length < 2 || test.length === 0) return null;
+    const fold = fitFold(train);
+    // Use the radar-7 interval width for every candidate.
+    const history = fold.rows.map((p) => Math.log10(p.mcap_usd!) - validationPrediction(p, fold.reference, asOf, MODEL, false));
+    const halfWidth = 1.2816 * sampleSd(history);
+    const errors = test.map(fold.residual);
+    const covered = errors.filter((e) => Math.abs(e) <= halfWidth).length;
+    return { adjusted: errorMetrics(errors), plain: errorMetrics(test.map(fold.plainResidual)), halfWidth, covered, n: test.length };
+  };
+  const looErrors = cohort.length < 3 ? [] : cohort.map((p, i) => {
+    const fold = fitFold(cohort.filter((_, j) => i !== j));
+    return { adjusted: fold.residual(p), plain: fold.plainResidual(p) };
+  });
+  const line = kept.length ? fitCompLine(kept, asOf, model) : null;
+  const residuals = line === null ? [] : kept.map((p) => Math.log10(p.mcap_usd!) - validationPrediction(p, line, asOf, model, fullValuation, 0));
+  const marketCaps = kept.map((p) => Math.log10(p.mcap_usd!));
+  const center = average(marketCaps);
+  const total = marketCaps.reduce((sum, y) => sum + (y - center) ** 2, 0);
+  return {
+    loo: looErrors.length ? { adjusted: errorMetrics(looErrors.map((r) => r.adjusted)), plain: errorMetrics(looErrors.map((r) => r.plain)) } : null,
+    forward: split(even, odd),
+    reverse: split(odd, even),
+    residualSd: residuals.length ? sampleSd(residuals) : null,
+    r2: total > 0 ? 1 - residuals.reduce((sum, e) => sum + e * e, 0) / total : null,
+  };
+}
+
+/** LOO and fixed-width coverage of the shipped model. */
+export function compsValidation(snapshot: Snapshot, model: ModelConstants = MODEL): ValidationStats {
+  const { loo, forward } = compsDiagnostics(snapshot, model);
+  return {
+    loo_median_factor: loo?.adjusted.medianFactor ?? null,
+    loo_plain_factor: loo?.plain.medianFactor ?? null,
+    split_half_factor: null,
+    split_half_plain_factor: forward?.plain.medianFactor ?? null,
+    coverage_80: forward ? forward.covered / forward.n : null,
+    coverage_n: forward?.n ?? Math.floor(keptComps(snapshot, model).length / 2),
+    checks_passed: 0,
+    checks_total: 0,
+  };
 }
 
 // ---------------------------------------------------------------- census
@@ -998,9 +1096,10 @@ export function bootstrapRanges(
   odds: OddsFit,
   board: BoardRow[],
   reps: number = ODDS.bootstrap_reps,
+  model: ModelConstants = MODEL,
 ): Map<string, { p10: number; p90: number; rankLow: number; rankHigh: number; top20: number }> {
   const rand = mulberry32(ODDS.bootstrap_seed);
-  const kept = keptComps(snapshot);
+  const kept = keptComps(snapshot, model);
   const oddsRows = oddsSet(snapshot);
   const samples = new Map<string, number[]>();
   const ranks = new Map<string, number[]>();
@@ -1016,8 +1115,7 @@ export function bootstrapRanges(
   for (let rep = 0; rep < reps; rep++) {
     // Refit the comps line on a resampled kept set.
     const sample = resample(kept);
-    const f = ols(sample.map((p) => ({ tvl: p.tvl_usd, mcap: p.mcap_usd! })));
-    const adj = categoryAdjustFor(sample);
+    const synthFit = fit.fallback ? fit : { ...fit, ...fitCompLine(sample, snapshot.as_of, model) };
     // Refit the odds model on a resampled odds set.
     const oSample = resample(oddsRows);
     const X = oSample.map((p) => oddsDesign(p, snapshot.as_of, odds.categories));
@@ -1032,8 +1130,7 @@ export function bootstrapRanges(
     for (const r of board) {
       const p = index.get(r.slug)!;
       // The shipped formula, with this resample's line, adjustments and odds.
-      const synthFit: FitResult = { ...fit, intercept: f.intercept, slope: f.slope, category_adjust: adj };
-      const { expected } = impliedValue(p, snapshot.as_of, MODEL, synthFit, oddsPred(p));
+      const { expected } = impliedValue(p, snapshot.as_of, model, synthFit, oddsPred(p));
       evs.push({ slug: r.slug, ev: expected });
       samples.get(r.slug)!.push(expected);
     }
@@ -1279,7 +1376,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
   const early = board.filter((r) => !watchlist.has(r.slug)).length;
   const index = bySlug(snapshot.protocols);
   // Bootstrap uncertainty, then the verdicts at the default scenario.
-  const ranges = bootstrapRanges(snapshot, fit, odds, board);
+  const ranges = bootstrapRanges(snapshot, fit, odds, board, ODDS.bootstrap_reps, model);
   let farmable = 0;
   let bestNetPerHour = -Infinity;
   let top20Stable = 0;
@@ -1299,12 +1396,12 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     if (v.verdict === 'FARM') farmable++;
     if (v.netPerHour > bestNetPerHour) bestNetPerHour = v.netPerHour;
   }
-  const validation = compsValidation(snapshot);
+  const validation = compsValidation(snapshot, model);
   validation.split_half_factor = fit.median_abs_log_error === null ? null : Math.pow(10, fit.median_abs_log_error);
   const checks: boolean[] = [
     validation.split_half_factor !== null && validation.split_half_plain_factor !== null && validation.split_half_factor < validation.split_half_plain_factor,
     validation.loo_median_factor !== null && validation.loo_plain_factor !== null && validation.loo_median_factor < validation.loo_plain_factor,
-    validation.coverage_80 !== null && validation.coverage_80 >= 0.65 && validation.coverage_80 <= 0.95,
+    validation.coverage_80 !== null && validation.coverage_80 >= (model.calibrated ? 0.8 : 0.65) && validation.coverage_80 <= 0.95,
     odds.brier_fwd < odds.base_brier_fwd,
     odds.brier_rev < odds.base_brier_rev,
   ];
@@ -1315,7 +1412,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     source: snapshot.source,
     floor_usd: snapshot.floor_usd,
     model,
-    model_version: MODEL_VERSION,
+    model_version: model.calibrated ? 'radar-8' : MODEL_VERSION,
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
     early_size: early,

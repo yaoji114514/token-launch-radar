@@ -1,7 +1,4 @@
-// Token Radar's dashboard. Reads window.RADAR (written beside dashboard/ by main.ts) and renders
-// the evidence board (with the fitted chart), the ranked table, the model and a per-protocol dossier.
-// No network: every byte it shows is in data.js. The page recomputes every expected value from the
-// snapshot figures with the same arithmetic main.ts runs, so the page and board.json agree.
+// Render the static board and recompute values from data.js.
 (function () {
   'use strict';
 
@@ -27,16 +24,14 @@
     if (days >= 365) return (days / 365).toFixed(1) + 'y';
     return Math.max(0, Math.round(days)) + 'd';
   }
-  // The model in one function: the fitted comps line, then growth, maturity and category
-  // adjustments, then the fitted launch odds. The page recomputes a row and checks board.json.
-  // Expected value is the if-launched value weighted by the odds.
   function ifLaunchedOf(row, model, fit) {
     var fitted = Math.pow(10, fit.intercept + fit.slope * Math.log10(Math.max(1, row.tvl_usd)));
     var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
-    var growthMult = 1 + (growth / 100) * model.growth_weight;
+    var growthMult = Math.pow(1 + (growth / 100) * model.growth_weight, model.growth_exponent ?? 1);
     var age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
     var maturity = model.maturity_floor + (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-    var adj = fit.category_adjust ? fit.category_adjust[row.category || 'Other'] : undefined;
+    var category = row.category == null ? 'Other' : row.category;
+    var adj = fit.category_adjust && Object.hasOwn(fit.category_adjust, category) ? fit.category_adjust[category] : 0;
     var catMult = Math.pow(10, adj === undefined || adj === null ? 0 : adj);
     return Math.max(1, Math.round(fitted * growthMult * maturity * catMult));
   }
@@ -160,7 +155,6 @@
   }
   // ==FARM-END==
 
-  // farmEconomics was scenarioEcon(p, 0) duplicated; callers use scenarioEcon directly.
   function fmtMinutes(m) {
     if (m < 60) return m + ' min';
     var h = Math.floor(m / 60);
@@ -318,8 +312,6 @@
     );
   }
 
-  // The evidence board: KPI strip, top-farm strip, 758-protocol ledger, validation table,
-  // integrity strip. Divs, not a table: the smoke test counts the board's rows by <tr>.
   function evidence() {
     var v = DATA.validation || {};
     var o = DATA.odds || {};
@@ -334,7 +326,6 @@
       kpi('FARM rows', String(DATA.farmable_rows), 'default scenario'),
       kpi('Best net/h', DATA.best_net_per_hour_usd !== undefined ? '$' + DATA.best_net_per_hour_usd.toFixed(0) : 'n/a', 'net of gas')
     );
-    // Top farm rows by net $/h, on the first screen. Default scenario, from the board.
     var topFarm = DATA.rows.filter(function (r) { return r.verdict === 'FARM'; }).sort(function (a, b) { return b.net_per_hour_usd - a.net_per_hour_usd; }).slice(0, 5).map(function (r) { return r.name + ' $' + Math.round(r.net_per_hour_usd) + '/h'; }).join(' · ');
     var farmTop = el('p', { class: 'integrity', text: 'Top farm by net $/h: ' + topFarm });
     var ledger = (DATA.ledger || []).map(function (g) {
@@ -345,22 +336,23 @@
         el('span', { class: 'sub', text: g.detail })
       );
     });
-    function vrow(label, value, verdict, note) {
+    function vrow(label, value, pass, note) {
       return el('div', { class: 'vrow' },
         el('span', { text: label }),
         el('b', { class: 'num', text: value }),
-        el('span', { class: 'vchip ' + (verdict === 'PASS' ? 'pass' : 'fail'), text: verdict }),
+        el('span', { class: 'vchip ' + (pass ? 'pass' : 'fail'), text: pass ? 'PASS' : 'FAIL' }),
         el('span', { class: 'sub', text: note })
       );
     }
+    var coverageMin = DATA.model.calibrated ? 0.8 : 0.65;
     var validation = el('div', { class: 'valid' },
       el('h2', { text: 'Validation, out of sample' }),
-      vrow('Split-half, adjusted', v.split_half_factor ? 'x' + v.split_half_factor.toFixed(2) : 'n/a', 'PASS', 'plain x' + (v.split_half_plain_factor ? v.split_half_plain_factor.toFixed(2) : 'n/a') + ', same held-out half'),
-      vrow('Leave-one-out', v.loo_median_factor ? 'x' + v.loo_median_factor.toFixed(2) : 'n/a', v.loo_median_factor && v.loo_plain_factor && v.loo_median_factor < v.loo_plain_factor ? 'PASS' : 'FAIL', 'plain x' + (v.loo_plain_factor ? v.loo_plain_factor.toFixed(2) : 'n/a') + (v.loo_median_factor && v.loo_plain_factor && v.loo_median_factor < v.loo_plain_factor ? ': earns its keep leave-one-out' : ': fails leave-one-out')),
-      vrow('80% interval coverage', v.coverage_80 !== null && v.coverage_80 !== undefined ? (v.coverage_80 * 100).toFixed(1) + '%' : 'n/a', 'PASS', 'inside the 65–95% band'),
-      vrow('Odds Brier, even fits odd', o.brier_fwd !== undefined ? o.brier_fwd.toFixed(3) : 'n/a', 'PASS', 'base rate ' + (o.base_brier_fwd !== undefined ? o.base_brier_fwd.toFixed(3) : 'n/a')),
-      vrow('Odds Brier, odd fits even', o.brier_rev !== undefined ? o.brier_rev.toFixed(3) : 'n/a', 'PASS', 'base rate ' + (o.base_brier_rev !== undefined ? o.base_brier_rev.toFixed(3) : 'n/a')),
-      el('p', { class: 'sub', text: 'Bootstrap, 200 seeded refits: ' + (DATA.top20_stable_count || 0) + ' of the top 20 stay top-20 in at least 80% of refits. The ranks move — the fit is loose, and each row\u2019s P10–P90 says how loose.' })
+      vrow('Split-half, adjusted', v.split_half_factor ? 'x' + v.split_half_factor.toFixed(2) : 'n/a', v.split_half_plain_factor && v.split_half_factor && v.split_half_factor < v.split_half_plain_factor, 'plain x' + (v.split_half_plain_factor ? v.split_half_plain_factor.toFixed(2) : 'n/a')),
+      vrow('Leave-one-out', v.loo_median_factor ? 'x' + v.loo_median_factor.toFixed(2) : 'n/a', v.loo_plain_factor && v.loo_median_factor && v.loo_median_factor < v.loo_plain_factor, 'plain x' + (v.loo_plain_factor ? v.loo_plain_factor.toFixed(2) : 'n/a')),
+      vrow('80% interval coverage', v.coverage_80 == null ? 'n/a' : (v.coverage_80 * 100).toFixed(1) + '%', v.coverage_80 >= coverageMin && v.coverage_80 <= 0.95, 'target ' + coverageMin * 100 + '–95%'),
+      vrow('Odds Brier, even fits odd', o.brier_fwd.toFixed(3), o.brier_fwd < o.base_brier_fwd, 'base rate ' + o.base_brier_fwd.toFixed(3)),
+      vrow('Odds Brier, odd fits even', o.brier_rev.toFixed(3), o.brier_rev < o.base_brier_rev, 'base rate ' + o.base_brier_rev.toFixed(3)),
+      el('p', { class: 'sub', text: '200 bootstrap refits. ' + DATA.top20_stable_count + ' of the top 20 stay there in at least 80% of refits.' })
     );
     var recomputed = 0;
     DATA.rows.forEach(function (r) { if (impliedOf(r, DATA.model, DATA.fit) === r.implied_value_usd) recomputed++; });
@@ -546,15 +538,14 @@
       return { c: c, mult: Math.pow(10, f.category_adjust[c]) };
     }) : [];
     adjEntries.sort(function (a, b) { return Math.abs(Math.log10(b.mult)) - Math.abs(Math.log10(a.mult)); });
-    var adjNote = adjEntries.length === 0
-      ? 'No category adjusts the fitted value on this snapshot: every category has too few traded protocols to earn one.'
-      : 'Category multiplier: ' + adjEntries.length + ' categories adjust the fitted value, each from its own traded protocols (median mcap/TVL vs the whole set, shrunk n/(n+5); under 3 earns none). Largest: ' +
-        adjEntries.slice(0, 3).map(function (e) { return e.c + ' x' + e.mult.toFixed(2); }).join(', ') + '.';
+    var adjNote = m.calibrated
+      ? 'Category shifts blend 75% of radar-7 with 25% pooled residuals in log space. The intercept is recalibrated on each fit.'
+      : 'Category shifts use shrunk median market cap / TVL ratios (category n≥8, otherwise family n≥5).';
+    if (adjEntries.length) adjNote += ' Largest: ' + adjEntries.slice(0, 3).map(function (e) { return e.c + ' x' + e.mult.toFixed(2); }).join(', ') + '.';
     return el('section', { class: 'panel model' },
       el('h2', { text: 'How implied value is computed' }),
-      el('p', { class: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
       el('div', { class: 'formula' },
-        'implied = round( 10 ^ (' + f.intercept.toFixed(4) + ' + ' + f.slope.toFixed(4) + ' x log10(tvl_usd)) x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') x category_multiplier )'
+        'implied = round( 10 ^ (' + f.intercept.toFixed(4) + ' + ' + f.slope.toFixed(4) + ' x log10(TVL)) x growth x maturity x category )'
       ),
       el('div', { class: 'formula' },
         'expected = round( implied x launch_odds )'
@@ -575,7 +566,9 @@
             el('span', { class: 'key diamond' }), ' Watchlist implied value'
           )
         ),
-      el('p', { class: 'sub', text: 'TVL and seven-day growth come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Growth is clamped so one hot week cannot dominate the ranking, and maturity rises with age up to three years.' })
+      el('p', { class: 'sub', text: m.calibrated
+        ? 'Growth is the square root of the radar-7 multiplier. Maturity is 1 in valuation. Age still enters launch odds.'
+        : 'The growth multiplier uses clamped seven-day growth. Maturity rises with age up to three years.' })
     );
   }
 
