@@ -84,6 +84,7 @@ export interface Snapshot {
 /** The model's constants, as the dashboard states them. */
 export interface ModelConstants {
   calibrated?: true;
+  fit_maturity?: true;
   growth_exponent?: number;
   growth_weight: number;
   growth_floor: number;
@@ -116,6 +117,13 @@ export const CALIBRATED_MODEL: ModelConstants = {
   growth_exponent: 0.5,
   maturity_floor: 1,
   maturity_range: 0,
+};
+
+export const MATURITY_MODEL: ModelConstants = {
+  ...CALIBRATED_MODEL,
+  fit_maturity: true,
+  maturity_floor: MODEL.maturity_floor,
+  maturity_range: MODEL.maturity_range,
 };
 
 /** The model's version label: the dashboard names it. */
@@ -247,6 +255,7 @@ export interface FitResult {
   median_abs_log_error: number | null;
   median_ratio: number;
   fallback: boolean;
+  maturity_fit?: { floor: number; range: number; n: number };
   /** Per-category log10 adjustment to the fitted value (radar-7 hybrid): the category's own
    *  median market-cap-to-TVL ratio against the global median, shrunk by n/(n+5), when the
    *  category has at least 8 traded comps in the kept set — else its semantic family's
@@ -686,7 +695,7 @@ export function impliedValue(
   fit: FitResult,
   odds: number | null = null,
 ): { implied: number; expected: number; odds: number; fitted: number; growthPct: number; growthMult: number; maturityMult: number; categoryMult: number; age: number | null } {
-  const { age, growthPct, growthMult, maturityMult } = valueMultipliers(protocol, asOf, model);
+  const { age, growthPct, growthMult, maturityMult } = valueMultipliers(protocol, asOf, model, fit.maturity_fit);
   const fitted = fittedMcap(protocol.tvl_usd, fit);
   const category = protocol.category ?? 'Other';
   const categoryMult = Math.pow(10, Object.hasOwn(fit.category_adjust, category) ? fit.category_adjust[category]! : 0);
@@ -696,13 +705,18 @@ export function impliedValue(
   return { implied, expected, odds: o, fitted, growthPct, growthMult, maturityMult, categoryMult, age };
 }
 
-function valueMultipliers(protocol: SnapshotProtocol, asOf: string, model: ModelConstants) {
+function ageFraction(age: number, model: ModelConstants): number {
+  return Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days;
+}
+
+function valueMultipliers(protocol: SnapshotProtocol, asOf: string, model: ModelConstants, maturity?: FitResult['maturity_fit']) {
   const age = ageDays(asOf, protocol.listed_at);
   const rawGrowth = finite(protocol.change_7d, 0);
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
   const growthMult = Math.pow(1 + (growthPct / 100) * model.growth_weight, model.growth_exponent ?? 1);
-  const ageForModel = age ?? model.unknown_age_days;
-  const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
+  const floor = maturity?.floor ?? model.maturity_floor;
+  const range = maturity?.range ?? model.maturity_range;
+  const maturityMult = floor + ageFraction(age ?? model.unknown_age_days, model) * range;
   return { age, growthPct, growthMult, maturityMult };
 }
 
@@ -870,7 +884,7 @@ function categoryAdjustFor(protocols: SnapshotProtocol[]): Record<string, number
   return adjust;
 }
 
-type CompLine = Pick<FitResult, 'intercept' | 'slope' | 'category_adjust'>;
+type CompLine = Pick<FitResult, 'intercept' | 'slope' | 'category_adjust' | 'maturity_fit'>;
 
 function validationPrediction(
   p: SnapshotProtocol,
@@ -884,7 +898,7 @@ function validationPrediction(
   const adjustment = Object.hasOwn(line.category_adjust, category) ? line.category_adjust[category]! : 0;
   const base = line.intercept + line.slope * Math.log10(Math.max(minimumTvl, p.tvl_usd)) + adjustment;
   if (!fullValuation) return base;
-  const { growthMult, maturityMult } = valueMultipliers(p, asOf, model);
+  const { growthMult, maturityMult } = valueMultipliers(p, asOf, model, line.maturity_fit);
   return base + Math.log10(growthMult * maturityMult);
 }
 
@@ -918,7 +932,7 @@ function pooledResiduals(rows: SnapshotProtocol[], line: CompLine): Record<strin
 }
 
 function fitCompLine(rows: SnapshotProtocol[], asOf: string, model: ModelConstants): CompLine {
-  const line = { ...ols(rows.map((p) => ({ tvl: p.tvl_usd, mcap: p.mcap_usd! }))), category_adjust: categoryAdjustFor(rows) };
+  const line: CompLine = { ...ols(rows.map((p) => ({ tvl: p.tvl_usd, mcap: p.mcap_usd! }))), category_adjust: categoryAdjustFor(rows) };
   if (!model.calibrated) return line;
 
   const pooled = pooledResiduals(rows, line);
@@ -930,16 +944,75 @@ function fitCompLine(rows: SnapshotProtocol[], asOf: string, model: ModelConstan
 
   // Balance the two tails of the multiplicative error on the training fold.
   // Clip training residuals before the exponential and shrink the shift to zero.
+  // Keep the v8 anchor identifiable: with a free intercept, multiplying both
+  // maturity endpoints and offsetting the intercept would give the same fit.
+  const anchor = model.fit_maturity ? { ...model, maturity_floor: 1, maturity_range: 0 } : model;
   let high = 0;
   let low = 0;
   for (const row of rows) {
-    const error = Math.log10(row.mcap_usd!) - validationPrediction(row, line, asOf, model, true);
+    const error = Math.log10(row.mcap_usd!) - validationPrediction(row, line, asOf, anchor, true);
     const clipped = Math.min(1.75, Math.max(-1.75, error));
     high += Math.pow(10, clipped);
     low += Math.pow(10, -clipped);
   }
   const shift = 0.5 * Math.log10(high / low) * rows.length / (rows.length + 10);
-  return { ...line, intercept: line.intercept + shift };
+  line.intercept += shift;
+  if (model.fit_maturity) {
+    line.maturity_fit = fitMaturity(rows, line, asOf, anchor);
+  }
+  return line;
+}
+
+/**
+ * Regularized least squares for log market-cap residuals with
+ * maturity = floor + range*t. Profile the log floor out for each old/new
+ * ratio. Fitting in log space keeps both endpoints positive.
+ */
+function fitMaturity(rows: SnapshotProtocol[], line: CompLine, asOf: string, anchor: ModelConstants): FitResult['maturity_fit'] {
+  const points: { age: number; residual: number }[] = [];
+  for (const row of rows) {
+    const age = ageDays(asOf, row.listed_at);
+    if (age === null) continue;
+    const residual = Math.log(row.mcap_usd!) - Math.LN10 * validationPrediction(row, line, asOf, anchor, true);
+    points.push({ age: ageFraction(age, anchor), residual });
+  }
+  if (points.length < 2 || points.every((p) => p.age === points[0]!.age)) return undefined;
+
+  // Use the original maturity span as the prior scale for the size of an age
+  // effect. Estimate noise from the training fold so weaker evidence gets
+  // more shrinkage toward a neutral multiplier.
+  const center = median(points.map((p) => p.residual));
+  const noise = 1.4826 * median(points.map((p) => Math.abs(p.residual - center)));
+  const priorScale = -Math.log(MODEL.maturity_floor);
+  const penalty = (noise / priorScale) ** 2;
+  function profile(logRatio: number) {
+    const ratio = Math.exp(logRatio);
+    const errors = points.map((p) => p.residual - Math.log(1 - p.age + p.age * ratio));
+    const logFloor = average(errors) * points.length / (points.length + penalty);
+    const loss = errors.reduce((sum, error) => sum + (error - logFloor) ** 2, 0)
+      + penalty * (logFloor ** 2 + logRatio ** 2);
+    return { logRatio, logFloor, loss };
+  }
+
+  // Search a coarse grid before refining the best bracket. The wide endpoint
+  // bound keeps extrapolation finite for a nearly degenerate fold.
+  const limit = 12;
+  let best = profile(0);
+  for (let q = -limit; q <= limit; q++) {
+    const candidate = profile(q);
+    if (candidate.loss < best.loss) best = candidate;
+  }
+  let left = Math.max(-limit, best.logRatio - 1);
+  let right = Math.min(limit, best.logRatio + 1);
+  for (let i = 0; i < 42; i++) {
+    const low = profile((2 * left + right) / 3);
+    const high = profile((left + 2 * right) / 3);
+    if (low.loss <= high.loss) right = high.logRatio;
+    else left = low.logRatio;
+  }
+  const fit = profile((left + right) / 2);
+  const floor = Math.exp(fit.logFloor);
+  return { floor, range: floor * Math.expm1(fit.logRatio), n: points.length };
 }
 
 const average = (values: number[]) => values.reduce((sum, x) => sum + x, 0) / values.length;
@@ -978,7 +1051,7 @@ export function compsDiagnostics(
     const plain = { ...reference, category_adjust: {} };
     const residual = (p: SnapshotProtocol) => Math.log10(p.mcap_usd!) - validationPrediction(p, line, asOf, model, fullValuation);
     const plainResidual = (p: SnapshotProtocol) => Math.log10(p.mcap_usd!) - validationPrediction(p, plain, asOf, MODEL, false, 0);
-    return { rows, reference, residual, plainResidual };
+    return { rows, reference, line, residual, plainResidual };
   };
   const split = (train: SnapshotProtocol[], test: SnapshotProtocol[]) => {
     if (train.length < 2 || test.length === 0) return null;
@@ -988,7 +1061,7 @@ export function compsDiagnostics(
     const halfWidth = 1.2816 * sampleSd(history);
     const errors = test.map(fold.residual);
     const covered = errors.filter((e) => Math.abs(e) <= halfWidth).length;
-    return { adjusted: errorMetrics(errors), plain: errorMetrics(test.map(fold.plainResidual)), halfWidth, covered, n: test.length };
+    return { adjusted: errorMetrics(errors), plain: errorMetrics(test.map(fold.plainResidual)), halfWidth, covered, n: test.length, maturityFit: fold.line.maturity_fit };
   };
   const looErrors = cohort.length < 3 ? [] : cohort.map((p, i) => {
     const fold = fitFold(cohort.filter((_, j) => i !== j));
@@ -1412,7 +1485,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     source: snapshot.source,
     floor_usd: snapshot.floor_usd,
     model,
-    model_version: model.calibrated ? 'radar-8' : MODEL_VERSION,
+    model_version: model.fit_maturity ? 'radar-9' : model.calibrated ? 'radar-8' : MODEL_VERSION,
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
     early_size: early,

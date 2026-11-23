@@ -25,7 +25,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSyn
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CALIBRATED_MODEL, MODEL, boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
+import { CALIBRATED_MODEL, MATURITY_MODEL, MODEL, boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
 import { buildDossier } from './vendor/makefun-board.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -50,14 +50,16 @@ if (!existsSync(inputFile)) {
   process.exit(2);
 }
 const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
-const modelName = arg('model', 'radar-8');
-if (modelName !== 'radar-7' && modelName !== 'radar-8') {
-  process.stderr.write('token radar: --model must be radar-7 or radar-8\n');
+const modelName = arg('model', 'radar-9');
+const models = new Map([['radar-7', MODEL], ['radar-8', CALIBRATED_MODEL], ['radar-9', MATURITY_MODEL]]);
+const model = models.get(modelName);
+if (!model) {
+  process.stderr.write('token radar: --model must be radar-7, radar-8 or radar-9\n');
   process.exit(2);
 }
 
 const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
-const { board, radar } = buildRadar(snapshot, modelName === 'radar-8' ? CALIBRATED_MODEL : MODEL);
+const { board, radar } = buildRadar(snapshot, model);
 const issue = boardIssue(board, snapshot);
 if (issue !== null) {
   process.stderr.write(`token radar: the model wrote a board the gate refuses: ${issue}\n`);

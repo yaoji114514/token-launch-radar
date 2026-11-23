@@ -29,7 +29,8 @@
     var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
     var growthMult = Math.pow(1 + (growth / 100) * model.growth_weight, model.growth_exponent ?? 1);
     var age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
-    var maturity = model.maturity_floor + (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
+    var m = fit.maturity_fit || { floor: model.maturity_floor, range: model.maturity_range };
+    var maturity = m.floor + (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * m.range;
     var category = row.category == null ? 'Other' : row.category;
     var adj = fit.category_adjust && Object.hasOwn(fit.category_adjust, category) ? fit.category_adjust[category] : 0;
     var catMult = Math.pow(10, adj === undefined || adj === null ? 0 : adj);
@@ -566,8 +567,12 @@
             el('span', { class: 'key diamond' }), ' Watchlist implied value'
           )
         ),
-      el('p', { class: 'sub', text: m.calibrated
-        ? 'Growth is the square root of the radar-7 multiplier. Maturity is 1 in valuation. Age still enters launch odds.'
+      el('p', { class: 'sub', text: m.fit_maturity
+        ? f.maturity_fit
+          ? 'Fitted maturity: floor ' + f.maturity_fit.floor.toFixed(4) + ', range ' + f.maturity_fit.range.toFixed(4) + ' (' + f.maturity_fit.n + ' known ages). Age is capped at ' + m.maturity_days + ' days.'
+          : 'Too little age variation to fit maturity. Using the radar-7 age curve.'
+        : m.calibrated
+        ? 'Growth uses the square root of the radar-7 multiplier. Age enters launch odds.'
         : 'The growth multiplier uses clamped seven-day growth. Maturity rises with age up to three years.' })
     );
   }
