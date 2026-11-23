@@ -1,8 +1,7 @@
 // Token Radar's dashboard. Reads window.RADAR (written beside dashboard/ by main.ts) and renders
-// the evidence board, the ranked table, the fitted model with its chart, and a per-protocol dossier
-// with the model's inputs, peers, farm economics and plan. No network: every byte
-// it shows is in data.js. The page recomputes every expected value from the snapshot figures with
-// the same arithmetic main.ts runs, so the page and board.json agree.
+// the evidence board (with the fitted chart), the ranked table, the model and a per-protocol dossier.
+// No network: every byte it shows is in data.js. The page recomputes every expected value from the
+// snapshot figures with the same arithmetic main.ts runs, so the page and board.json agree.
 (function () {
   'use strict';
 
@@ -161,17 +160,7 @@
   }
   // ==FARM-END==
 
-  // The plan's costed economics, from the same helpers as the steps: capital, gas, time, break-even.
-  function farmEconomics(p) {
-    var capital = capitalFor(p);
-    var second = secondChainOf(p);
-    var secondCapital = second !== null ? Math.max(25, Math.round(capital / 2)) : 0;
-    var hold = holdDaysFor(p.age_days);
-    var weeks = Math.ceil(hold / 7);
-    var gas = 3 + gasFor(capital) + (second !== null ? 3 : 2) + 2 * weeks;
-    var minutes = 5 + 15 + 10 + 10 * weeks + 10 + 5;
-    return { capital: capital + secondCapital, gas: gas, hold: hold, weeks: weeks, minutes: minutes };
-  }
+  // farmEconomics was scenarioEcon(p, 0) duplicated; callers use scenarioEcon directly.
   function fmtMinutes(m) {
     if (m < 60) return m + ' min';
     var h = Math.floor(m / 60);
@@ -222,7 +211,7 @@
     var k;
     for (k = x0; k <= x1; k++) {
       s += '<line x1="' + X(k).toFixed(1) + '" y1="' + T + '" x2="' + X(k).toFixed(1) + '" y2="' + (H - B) + '" class="grid" />';
-      s += '<text x="' + X(k).toFixed(1) + '" y="' + (H - B + 18) + '" class="tick">' + fmtUsd(Math.pow(10, k)) + '</text>';
+      s += '<text x="' + X(k).toFixed(1) + '" y="' + (H - B + 18) + '" class="tick' + (k === x1 ? ' end' : '') + '">' + fmtUsd(Math.pow(10, k)) + '</text>';
     }
     for (k = y0; k <= y1; k++) {
       s += '<line x1="' + L + '" y1="' + Y(k).toFixed(1) + '" x2="' + (W - R) + '" y2="' + Y(k).toFixed(1) + '" class="grid" />';
@@ -382,8 +371,14 @@
     return el('section', { class: 'evidence' },
       kpis,
       farmTop,
-      el('div', { class: 'ledger' }, el('h2', { text: 'The whole snapshot: 758 protocols' }), ledger),
-      validation,
+      el('div', { class: 'evidence-main' },
+        el('div', { class: 'evidence-left' },
+          el('div', { class: 'ledger' }, el('h2', { text: 'The whole snapshot: 758 protocols' }), ledger),
+          validation),
+        el('div', { class: 'panel chart-panel' },
+          el('h2', { text: 'The comps line, fitted' }),
+          el('div', { class: 'chart', html: chartSvg() }),
+          el('p', { class: 'sub', text: 'Dots are traded protocols; diamonds are watchlist implied values; the line is the fitted comps line.' }))),
       integrity
     );
   }
@@ -566,9 +561,7 @@
       ),
       el('p', { class: 'sub', text: oddsNote() }),
       el('p', { class: 'sub', text: adjNote }),
-      el('div', { class: 'fit-grid' },
-        el('div', { class: 'chart', html: chartSvg() }),
-        el('div', { class: 'fit-stats' },
+      el('div', { class: 'fit-stats' },
           el('div', { class: 'fact' }, el('span', { text: 'Traded protocols fitted' }), el('b', { text: f.n + ' of ' + f.n_total })),
           el('div', { class: 'fact' }, el('span', { text: 'Fitted slope (log-log)' }), el('b', { text: f.slope.toFixed(3) })),
           el('div', { class: 'fact' }, el('span', { text: 'R-squared (log space)' }), el('b', { text: f.r2.toFixed(3) })),
@@ -581,8 +574,7 @@
             el('span', { class: 'key out' }), ' Trimmed outlier  ',
             el('span', { class: 'key diamond' }), ' Watchlist implied value'
           )
-        )
-      ),
+        ),
       el('p', { class: 'sub', text: 'TVL and seven-day growth come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Growth is clamped so one hot week cannot dominate the ranking, and maturity rises with age up to three years.' })
     );
   }
@@ -607,7 +599,7 @@
     writeHash();
     dialog.textContent = '';
     var steps = farmSteps(row);
-    var econ = farmEconomics(row);
+    var econ = scenarioEcon(row, 0);
     var recomputed = impliedOf(row, DATA.model, DATA.fit);
     dialog.appendChild(el('div', { class: 'detail-head' },
       el('div', null,
@@ -617,7 +609,9 @@
       ),
       el('button', { class: 'close', type: 'button', 'aria-label': 'Close details', text: 'Close', onclick: function () { dialog.close(); } })
     ));
-    dialog.appendChild(el('section', { class: 'detail-section' },
+    var cols = el('div', { class: 'detail-cols' });
+    dialog.appendChild(cols);
+    cols.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Implied value' }),
       el('div', { class: 'equation' },
         el('div', null, el('span', { text: 'TVL' }), el('b', { class: 'num', text: fmtUsd(row.tvl_usd) })),
@@ -635,7 +629,7 @@
       ),
       el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(recomputed) + (recomputed === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
     ));
-    dialog.appendChild(el('section', { class: 'detail-section' },
+    cols.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Nearest traded peers' }),
       el('div', { class: 'peers' }, peersOf(row).map(function (p) {
         return el('div', { class: 'peer' },
@@ -662,7 +656,7 @@
         })
       );
     });
-    dialog.appendChild(el('section', { class: 'detail-section' },
+    cols.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm economics' }),
       el('div', { class: 'equation' },
         el('div', null, el('span', { text: 'Capital in positions' }), el('b', { class: 'num', text: '$' + econ.capital })),
@@ -682,7 +676,7 @@
       ),
       el('p', { class: 'sub', text: 'Each cell is the expected allocation minus the plan\u2019s gas at that deposit; green pays for itself. Break-even drop share is ' + (econ.gas / row.implied_value_usd * 100).toFixed(4) + '% of expected value.' })
     ));
-    dialog.appendChild(el('section', { class: 'detail-section' },
+    cols.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan' }),
       el('ol', { class: 'steps' }, steps.map(function (s) {
         var at = s.indexOf(' Cost: ');

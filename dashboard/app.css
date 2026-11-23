@@ -1,5 +1,4 @@
-/* Token Radar's plain theme. The five palette values, two radii and two families are the whole style;
-   everything else is spacing, a hairline and a type step. */
+/* Token Radar's plain theme. */
 :root {
   --canvas: #f2f5f3;
   --surface: #ffffff;
@@ -120,7 +119,6 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 
 .model { margin-top: var(--step-4); padding: var(--step-5); display: grid; gap: var(--step-3); }
 .formula { font-family: var(--font-num); font-size: 13px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; }
-.fit-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: var(--step-5); align-items: start; }
 .chart svg { width: 100%; height: auto; display: block; }
 .chart .grid { stroke: var(--border); stroke-width: 1; }
 .chart .tick { fill: var(--muted); font: 11px var(--font-num); text-anchor: middle; }
@@ -130,7 +128,7 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .chart .dot { fill: var(--accent); opacity: 0.75; }
 .chart .dot.out { fill: var(--surface); stroke: var(--muted); stroke-width: 1; opacity: 0.9; }
 .chart .diamond { fill: var(--amber); opacity: 0.9; }
-.fit-stats { display: grid; gap: var(--step-2); align-content: start; border-left: 1px solid var(--border); padding-left: var(--step-5); }
+.fit-stats { display: grid; gap: var(--step-2); align-content: start; }
 .fit-stats .fact { display: flex; align-items: baseline; justify-content: space-between; gap: var(--step-3); }
 .fit-stats .fact b { font-family: var(--font-num); font-size: 14px; font-weight: 500; }
 .fit-stats .fact span { color: var(--muted); font-size: 13px; }
@@ -144,13 +142,9 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .button { min-height: 36px; padding: 0 var(--step-4); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
 .button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
 
-.detail {
-  position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 94vw); z-index: 10;
-  background: var(--surface); border-left: 1px solid var(--border); padding: var(--step-5);
-  overflow-y: auto; transform: translateX(0); transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
-}
-.detail[hidden] { display: none; }
-.detail { margin: 0 0 0 auto; max-height: 100%; }
+.detail{position:fixed;inset:0;margin:auto;width:min(1180px,94vw);height:min(880px,92vh);z-index:10;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);padding:var(--step-5);overflow-y:auto}
+.detail[hidden]{display:none}
+.detail-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 var(--step-5)}
 .detail::backdrop { background: rgba(22, 33, 28, 0.28); }
 .detail-head { display: flex; align-items: start; justify-content: space-between; gap: var(--step-4); }
 .detail-head > div { min-width: 0; }
@@ -175,14 +169,19 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
   .lede { grid-template-columns: 1fr; gap: var(--step-4); }
   .facts { border-left: 0; border-top: 1px solid var(--border); padding-left: 0; padding-top: var(--step-4); }
   .field input { min-width: 0; width: 100%; }
-  .fit-grid { grid-template-columns: 1fr; }
-  .fit-stats { border-left: 0; border-top: 1px solid var(--border); padding-left: 0; padding-top: var(--step-4); }
+  .evidence-main { grid-template-columns: 1fr; }
+  .detail-cols { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
 
 .evidence{margin-top:var(--step-5);display:grid;gap:var(--step-4)}
+.evidence-main{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,.9fr);gap:var(--step-4);align-items:start}
+.evidence-left{display:grid;gap:var(--step-4);align-content:start}
+.chart-panel{padding:var(--step-4)}
+.chart-panel h2{font-size:14px;margin-bottom:var(--step-2)}
+.chart-panel .sub{margin-top:var(--step-2)}
 .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:var(--step-3)}
 .kpi,.ledger,.valid,.integrity{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel)}
 .kpi{padding:var(--step-3);display:grid;gap:2px}
